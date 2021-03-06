@@ -6,18 +6,20 @@ namespace Kdl.Cli
     public class Program
     {
         protected const string DataDir = "../../../../Kdl.Core/Data";
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
             Console.WriteLine("program begin");
             BoardFiddle();
             Console.WriteLine("program end");
+            return 0;
         }
 
         static void BoardFiddle()
         {
             var board = Board.FromJson(
-                DataDir + "/RoomsMainAll.json",
-                DataDir + "/RoomIdsMainWestWing.json");
+                DataDir + "/BoardMain.json",
+                new[] { "west" });
+            var deck = Deck.FromJson(DataDir + "/Cards.json");
         }
     }
 }

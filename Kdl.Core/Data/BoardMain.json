@@ -1,5 +1,10 @@
 {
     "Name": "main",
+    // choose first that is open room
+    "PlayerStartRoomIds": [1],
+    "DoctorStartRoomIds": [15],
+    "CatStartRoomIds": [10, 2],
+    "DogStartRoomIds": [19, 6],
     "Wings":
     [
         {
@@ -101,7 +106,7 @@
             "Id": 15,
             "Name": "gallery",
             "Adjacent": [13,14,16],
-            "Visible": [1,4,12,13,14,16]
+            "Visible": [1,4,12,13,14,16,24]
         },
         {
             "Id": 16,

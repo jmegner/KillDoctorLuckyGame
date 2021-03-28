@@ -32,23 +32,9 @@ namespace Kdl.Core
         int Attack,
         int SpecialAttack)
     {
-        public static Card NewWeapon(
-            string name,
-            string roomName,
-            int clover,
-            int attack,
-            int specialAttack)
-        {
-            var card = new Card(
-                CardType.Weapon,
-                name,
-                roomName,
-                clover,
-                0,
-                attack,
-                specialAttack);
-            return card;
-        }
+        public static Card FairFailure = Card.NewFailure("FairFailure", 2);
+        public static Card FairMove = Card.NewMove("FairMove", 1, 1);
+        public static Card FairWeapon = Card.NewWeapon("FairWeapon", "NoRoom", 1, 2, 5);
 
         public static Card NewFailure(
             string name,
@@ -66,19 +52,36 @@ namespace Kdl.Core
         }
 
         public static Card NewMove(
-            string name,
             string roomName,
             int clover,
             int move)
         {
             var card = new Card(
                 CardType.Move,
-                name,
+                roomName,
                 roomName,
                 clover,
                 move,
                 0,
                 0);
+            return card;
+        }
+
+        public static Card NewWeapon(
+            string name,
+            string roomName,
+            int clover,
+            int attack,
+            int specialAttack)
+        {
+            var card = new Card(
+                CardType.Weapon,
+                name,
+                roomName,
+                clover,
+                0,
+                attack,
+                specialAttack);
             return card;
         }
 

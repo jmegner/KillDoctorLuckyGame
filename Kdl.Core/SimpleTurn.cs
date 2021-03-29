@@ -15,6 +15,8 @@ namespace Kdl.Core
         {
         }
 
+        public static implicit operator ImmutableArray<PlayerMove>(SimpleTurn value) => value.Moves;
+
         public override string ToString()
             => string.Join<PlayerMove>(" ", Moves) + ';';
     }

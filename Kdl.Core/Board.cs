@@ -29,6 +29,7 @@ namespace Kdl.Core
         public bool[,] Adjacency { get; init; } // double-indexed by roomId
         public bool[,] Sight { get; init; } // double-indexed by roomId
         public int[,] Distance { get; init; } // double-indexed by roomId
+        public int[] AdjacencyCount { get; init; } // indexed by roomId
         public int PlayerStartRoomId { get; init; }
         public int DoctorStartRoomId { get; init; }
         public int CatStartRoomId { get; init; }
@@ -59,11 +60,13 @@ namespace Kdl.Core
             var matrixDim = Rooms.Keys.Max() + 1;
             Adjacency = new bool[matrixDim, matrixDim];
             Sight = new bool[matrixDim, matrixDim];
+            AdjacencyCount = new int[matrixDim];
 
             foreach (var room in Rooms.Values)
             {
                 Adjacency[room.Id, room.Id] = true;
                 Sight[room.Id, room.Id] = true;
+                AdjacencyCount[room.Id] = room.Adjacent.Length;
 
                 foreach(var adjacentRoomId in room.Adjacent)
                 {
@@ -75,6 +78,8 @@ namespace Kdl.Core
                     Sight[room.Id, visibleRoomId] = true;
                 }
             }
+
+
 
             Distance = new int[matrixDim, matrixDim];
             for(int i = 0; i < Distance.Length; i++)

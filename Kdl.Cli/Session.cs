@@ -25,6 +25,7 @@ namespace Kdl.Cli
         CommonGameState GameCommon { get; set; }
         SmallGameState Game { get; set; }
         bool ShouldQuit { get; set; }
+        int AnalysisLevel { get; set; }
 
         string BoardPath => JsonFilePath(BoardName);
         string DeckPath => JsonFilePath(DeckName);
@@ -62,10 +63,34 @@ namespace Kdl.Cli
 
         }
 
+        protected string WithoutComments(string directive)
+        {
+            const char commentStartChar = '(';
+            const char commentEndChar = ')';
+
+            while(directive.IndexOf(commentStartChar) > -1)
+            {
+                var commentStartIdx = directive.IndexOf(commentStartChar);
+                var commentEndIdx = directive.IndexOf(commentEndChar);
+
+                if(commentEndIdx == -1)
+                {
+                    directive = directive.Substring(0, commentStartIdx);
+                }
+                else
+                {
+                    directive = directive.Substring(0, commentStartIdx) + directive.Substring(commentEndIdx + 1);
+                }
+            }
+
+            return directive;
+        }
+
         protected void InterpretDirective(string directive)
         {
-            var tokens = directive.Split(' ');
-            var directiveTag = tokens[0].ToLowerInvariant();
+            directive = WithoutComments(directive);
+            var tokens = directive.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var directiveTag = tokens.Length == 0 ? "" : tokens[0].ToLowerInvariant().Trim();
 
             if (string.IsNullOrWhiteSpace(directive))
             {
@@ -86,7 +111,33 @@ namespace Kdl.Cli
             }
             else if (directiveTag == "h")
             {
-                Console.WriteLine(Game.NormalTurnHist());
+                if (tokens.Length >= 2 && bool.TryParse(tokens[1], out var alwaysShowPlayerId))
+                {
+                    Console.WriteLine(Game.NormalTurnHist(alwaysShowPlayerId));
+                }
+                else
+                {
+                    Console.WriteLine(Game.NormalTurnHist());
+                }
+            }
+            else if (directiveTag == "a"
+             || directiveTag == "x")
+            {
+                if (tokens.Length >= 2 && int.TryParse(tokens[1], out var analysisLevel))
+                {
+                    AnalysisLevel = analysisLevel;
+                }
+
+                var playerId = Game.CurrentPlayerId;
+
+                if (tokens.Length >= 3 && int.TryParse(tokens[2], out var playerDisplayNum))
+                {
+                    playerId = CommonGameState.ToPlayerId(playerDisplayNum);
+                }
+
+                bool doSuggestedMove = directiveTag == "x";
+
+                Analyze(doSuggestedMove, AnalysisLevel, playerId);
             }
             else if (directiveTag == "board")
             {
@@ -123,10 +174,11 @@ namespace Kdl.Cli
             {
                 var explanations = new List<string>()
                 {
-                    "q    | quit",
-                    "d    | display game state",
-                    "r    | reset game",
-                    "h    | display user-turn history",
+                    "q       | quit",
+                    "d       | display game state",
+                    "r       | reset game",
+                    "h       | display user-turn history",
+                    "a [int] | analyze next move [int] deep",
                     "board [boardName]",
                     "closedwings [wing1] [wing2] [...]",
                     "numplayers [int]",
@@ -136,6 +188,24 @@ namespace Kdl.Cli
                 Console.WriteLine($"  unrecognized directive '{directive}'");
                 explanations.Sort();
                 explanations.ForEach(x => Console.WriteLine("  " + x));
+            }
+        }
+
+        protected void Analyze(bool doSuggestedMove, int analysisLevel, int playerId)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var appraisedMove = Game.Appraise(playerId, analysisLevel);
+            watch.Stop();
+            Console.WriteLine(
+                "bestMove=" + appraisedMove.Move
+                + ", level=" + analysisLevel
+                + ", appraisal=" + appraisedMove.Appraisal.ToString("N4")
+                + ", timeMs=" + watch.ElapsedMilliseconds
+                );
+
+            if(doSuggestedMove)
+            {
+                DoMoves(new[] { appraisedMove.Move });
             }
         }
 
@@ -173,23 +243,19 @@ namespace Kdl.Cli
 
             if (!hasParseErrors)
             {
-                var turn = new SimpleTurn(moves.ToArray());
+                DoMoves(moves);
+            }
+        }
 
-                if (turn == null)
-                {
-                    Console.WriteLine("  moved too far or moved another normal player");
-                }
-                else
-                {
-                    if (Game.CheckNormalTurn(turn, out var errorMsg))
-                    {
-                        Game = Game.AfterNormalTurn(turn);
-                    }
-                    else
-                    {
-                        Console.WriteLine($"  invalid turn: {errorMsg}");
-                    }
-                }
+        protected void DoMoves(IEnumerable<PlayerMove> moves)
+        {
+            if (Game.CheckNormalTurn(moves, out var errorMsg))
+            {
+                Game = Game.AfterNormalTurn(moves, true);
+            }
+            else
+            {
+                Console.WriteLine($"  invalid turn: {errorMsg}");
             }
         }
 

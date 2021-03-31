@@ -111,9 +111,10 @@ namespace Kdl.Cli
             }
             else if (directiveTag == "h")
             {
-                if (tokens.Length >= 2 && bool.TryParse(tokens[1], out var alwaysShowPlayerId))
+                if (tokens.Length >= 2 && bool.TryParse(tokens[1], out var verbose))
                 {
-                    Console.WriteLine(Game.NormalTurnHist(alwaysShowPlayerId));
+                    // verbose option not implemented yet
+                    Console.WriteLine(Game.NormalTurnHist());
                 }
                 else
                 {
@@ -139,7 +140,7 @@ namespace Kdl.Cli
 
                 Analyze(doSuggestedMove, AnalysisLevel, playerId);
             }
-            else if (directiveTag == "board")
+            else if (directiveTag == "b" || directiveTag == "board")
             {
                 if(tokens.Length != 2)
                 {
@@ -150,11 +151,11 @@ namespace Kdl.Cli
                     BoardName = tokens[1];
                 }
             }
-            else if (directiveTag == "closedwings")
+            else if (directiveTag == "w" || directiveTag == "wingsclosed")
             {
                 ClosedWingNames = tokens.Skip(1).ToList();
             }
-            else if (directiveTag == "numplayers")
+            else if (directiveTag == "p" || directiveTag == "numplayers")
             {
                 var newVal = NumNormalPlayers;
                 if(tokens.Length != 2 || !int.TryParse(tokens[1], out newVal))
@@ -193,6 +194,7 @@ namespace Kdl.Cli
 
         protected void Analyze(bool doSuggestedMove, int analysisLevel, int playerId)
         {
+            SmallGameState.AppraiseExecCount = 0;
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var appraisedMove = Game.Appraise(playerId, analysisLevel);
             watch.Stop();
@@ -201,6 +203,7 @@ namespace Kdl.Cli
                 + ", level=" + analysisLevel
                 + ", appraisal=" + appraisedMove.Appraisal.ToString("N4")
                 + ", timeMs=" + watch.ElapsedMilliseconds
+                + ", states=" + SmallGameState.AppraiseExecCount.ToString("N0")
                 );
 
             if(doSuggestedMove)

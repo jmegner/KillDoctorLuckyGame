@@ -45,7 +45,7 @@ namespace Kdl.Core
                 {
                     // 'attacker side' is just the corresponding normal player id to take care of allied strangers
                     var attackerSideId = RuleHelper.ToNormalPlayerId(attackerPlayerId, numNormalPlayers);
-                    var sign = attackerSideId == scoringPlayerId ? 1.0 : -1.0;
+                    var sign = attackerSideId == scoringPlayerId ? 1.0 : -1.0 / (numNormalPlayers - 1);
 
                     score += sign * attackerSideWeights[attackerSideId] * playerStrengths[attackerPlayerId];
                     playerStrengths[attackerPlayerId]++;

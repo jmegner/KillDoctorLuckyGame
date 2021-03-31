@@ -50,7 +50,7 @@ namespace Kdl.Core
         ImmutableArray<double> PlayerMovePoints,
         ImmutableArray<bool> PlayersHadTurn,
         ImmutableArray<int> AttackerHist,
-        SmallGameState PreviousGameState)
+        SmallGameState PrevState)
     {
         public static SmallGameState AtStart(CommonGameState common)
         {
@@ -80,6 +80,26 @@ namespace Kdl.Core
                 AttackerHist,
                 out gainFromAttackingNext);
 
+        public bool IsNormalTurn => Common.GetPlayerType(CurrentPlayerId) == PlayerType.Normal;
+
+        public int Ply()
+        {
+            int ply = 0;
+            var state = this.PrevState;
+
+            while(state != null)
+            {
+                if(state.IsNormalTurn)
+                {
+                    ply++;
+                }
+
+                state = state.PrevState;
+            }
+
+            return ply;
+        }
+
         public PlayerType CurrentPlayerType => Common.GetPlayerType(CurrentPlayerId);
 
         public string PlayerText() => PlayerText(CurrentPlayerId);
@@ -91,17 +111,20 @@ namespace Kdl.Core
             + (Common.GetPlayerType(playerId) == PlayerType.Stranger ? "" : ",M" + PlayerMovePoints[playerId])
             + ")";
 
+        public bool PlayerSeesPlayer(int playerId1, int playerId2)
+            => Common.Board.Sight[PlayerRoomIds[playerId1], PlayerRoomIds[playerId2]];
+
         public string Summary(int indentationLevel)
         {
-            return Summary(Util.Print.Indentation(indentationLevel));
+            return StateSummary(Util.Print.Indentation(indentationLevel));
         }
 
-        public string Summary(string leadingText = "")
+        public string StateSummary(string leadingText = "")
         {
             var sb = new StringBuilder();
             sb.Append($"{leadingText}Turn {TurnId}, {PlayerText()}, P1Score={AttackScore():N2}");
             sb.Append($"\n{leadingText}  AttackHist={{{string.Join(',', AttackerHist.Select(CommonGameState.ToPlayerDisplayNum))}}}");
-            sb.Append($"\n{leadingText}  Doctor@R{DoctorRoomId}");
+            sb.Append($"\n{leadingText}  Dr@R{DoctorRoomId}");
 
             var playersWhoCanSeeDoctor = Common.PlayerIds.Zip(PlayerRoomIds)
                 .Where(x => Common.Board.Sight[x.Second, DoctorRoomId])
@@ -122,7 +145,12 @@ namespace Kdl.Core
 
                 if (playerId == CurrentPlayerId)
                 {
-                    sb.Append(" current player");
+                    sb.Append(" *");
+                }
+
+                if(PlayerRoomIds[playerId] == DoctorRoomId)
+                {
+                    sb.Append(" D");
                 }
             }
 
@@ -132,6 +160,19 @@ namespace Kdl.Core
 
         public bool CheckNormalTurn(IEnumerable<PlayerMove> moves, out string errorMsg)
         {
+            foreach(var move in moves)
+            {
+                if(move.PlayerId >= Common.NumAllPlayers)
+                {
+                    errorMsg = $"invalid playerId {move.PlayerId} (displayed {PlayerText(move.PlayerId)}";
+                    return false;
+                }
+                else if(!Common.Board.RoomIds.Contains(move.DestRoomId))
+                {
+                    errorMsg = $"invalid roomId {move.DestRoomId}";
+                    return false;
+                }
+            }
             var totalDist = moves.Sum(move => Common.Board.Distance[PlayerRoomIds[move.PlayerId], move.DestRoomId]);
 
             if (PlayerMovePoints[CurrentPlayerId] < totalDist - 1)
@@ -165,13 +206,6 @@ namespace Kdl.Core
         {
             // no turn validity checking; that is done in other method
 
-            if(wantLog)
-            {
-                Console.WriteLine($"Turn {TurnId}, {PlayerText()}");
-                Console.WriteLine($"  at start...");
-                Console.WriteLine(Summary(Util.Print.Indentation(2)));
-            }
-
             // move phase ======================================================
 
             var totalDist = moves.Sum(move => Common.Board.Distance[PlayerRoomIds[move.PlayerId], move.DestRoomId]);
@@ -180,52 +214,40 @@ namespace Kdl.Core
 
             ImmutableArray<int>.Builder newPlayerRoomIdsBuilder = null;
 
-            if(wantLog)
-            {
-                Console.WriteLine($"  moves...");
-            }
+            bool movedStrangerThatSawCurrentPlayer = false;
 
             foreach(var move in moves)
             {
-                if(wantLog)
-                {
-                    var startRoomId = PlayerRoomIds[move.PlayerId];
-                    var dist = Common.Board.Distance[startRoomId, move.DestRoomId];
-                    Console.WriteLine($"    MOVE: {PlayerText(move.PlayerId)} from R{startRoomId} to R{move.DestRoomId} ({dist}mp)");
-                }
-
                 if(newPlayerRoomIdsBuilder == null)
                 {
                     newPlayerRoomIdsBuilder = PlayerRoomIds.ToBuilder();
                 }
 
                 newPlayerRoomIdsBuilder[move.PlayerId] = move.DestRoomId;
+
+                if(move.PlayerId != CurrentPlayerId && PlayerSeesPlayer(move.PlayerId, CurrentPlayerId))
+                {
+                    movedStrangerThatSawCurrentPlayer = true;
+                }
             }
 
             // action phase (attack or loot) ===================================
 
             var newAttackerHist = AttackerHist;
 
-            var action = BestActionAllowed(CurrentPlayerId, DoctorRoomId, newPlayerRoomIdsBuilder);
+            var action = BestActionAllowed(
+                CurrentPlayerId,
+                DoctorRoomId,
+                newPlayerRoomIdsBuilder,
+                movedStrangerThatSawCurrentPlayer);
 
             if(action == PlayerAction.Attack)
             {
                 newAttackerHist = newAttackerHist.Add(CurrentPlayerId);
-
-                if(wantLog)
-                {
-                    var playerNums = newAttackerHist.Select(CommonGameState.ToPlayerDisplayNum);
-                    Console.WriteLine($"  ATTACK({PlayerText()}): hist={string.Join(',', playerNums)}");
-                }
             }
             else if(action == PlayerAction.Loot)
             {
                 newPlayerMovePoints = newPlayerMovePoints.IncrementVal(CurrentPlayerId, RuleHelper.SuperSimple.MovePointsPerLoot);
-
-                if(wantLog)
-                {
-                    Console.WriteLine($"  LOOT: {PlayerText()} has {newPlayerMovePoints[CurrentPlayerId]}mp");
-                }
             }
 
             // doctor phase ====================================================
@@ -233,8 +255,7 @@ namespace Kdl.Core
                 newPlayerRoomIdsBuilder,
                 out var newPlayersHadTurn,
                 out var newCurrentPlayerId,
-                out var newDoctorRoomId,
-                wantLog);
+                out var newDoctorRoomId);
 
             // wrap-up phase ===================================================
             var newState = new SmallGameState(
@@ -248,16 +269,15 @@ namespace Kdl.Core
                     newAttackerHist,
                     this);
 
+            if(wantLog)
+            {
+                Console.WriteLine(newState.PrevTurnSummary(true));
+            }
+
             if(Common.GetPlayerType(newCurrentPlayerId) == PlayerType.Stranger)
             {
                 // could avoid newState allocation and pass underlying variables directly
                 return newState.AfterStrangerTurn(wantLog);
-            }
-
-            if(wantLog)
-            {
-                Console.WriteLine($"  preview of next turn...");
-                Console.WriteLine(newState.Summary(Util.Print.Indentation(2)));
             }
 
             return newState;
@@ -265,14 +285,7 @@ namespace Kdl.Core
 
         public SmallGameState AfterStrangerTurn(bool wantLog)
         {
-            if(wantLog)
-            {
-                Console.WriteLine($"Turn {TurnId}, {PlayerText()}");
-                Console.WriteLine($"  at start...");
-                Console.WriteLine(Summary(Util.Print.Indentation(2)));
-            }
-
-            var bestAction = BestActionAllowed(CurrentPlayerId, DoctorRoomId, PlayerRoomIds);
+            var bestAction = BestActionAllowed(CurrentPlayerId, DoctorRoomId, PlayerRoomIds, false);
 
             // move phase ======================================================
 
@@ -285,12 +298,7 @@ namespace Kdl.Core
             // check for attack again after move
             if(bestAction != PlayerAction.Attack)
             {
-                if(wantLog)
-                {
-                    Console.WriteLine($"  MOVE {PlayerText()} from R{PlayerRoomIds[CurrentPlayerId]} to R{newCurrentPlayerRoomId}");
-                }
-
-                bestAction = BestActionAllowed(CurrentPlayerId, DoctorRoomId, newPlayerRoomIds);
+                bestAction = BestActionAllowed(CurrentPlayerId, DoctorRoomId, newPlayerRoomIds, false);
             }
 
             // action phase ====================================================
@@ -300,12 +308,6 @@ namespace Kdl.Core
             if(bestAction == PlayerAction.Attack)
             {
                 newAttackerHist = newAttackerHist.Add(CurrentPlayerId);
-
-                if(wantLog)
-                {
-                    var attackerDisplayNumsText = string.Join(',', newAttackerHist.Select(CommonGameState.ToPlayerDisplayNum));
-                    Console.WriteLine($"  ATTACK({PlayerText()}): allAttacks={attackerDisplayNumsText}");
-                }
             }
 
             // doctor phase ====================================================
@@ -313,8 +315,7 @@ namespace Kdl.Core
                 newPlayerRoomIds,
                 out var newPlayersHadTurn,
                 out var newCurrentPlayerId,
-                out var newDoctorRoomId,
-                wantLog);
+                out var newDoctorRoomId);
 
             // wrap-up phase ===================================================
             var newState = new SmallGameState(
@@ -336,8 +337,7 @@ namespace Kdl.Core
 
             if(wantLog)
             {
-                Console.WriteLine($"  preview of next turn...");
-                Console.WriteLine(newState.Summary(Util.Print.Indentation(2)));
+                Console.WriteLine(newState.PrevTurnSummary(true));
             }
 
             return newState;
@@ -347,16 +347,10 @@ namespace Kdl.Core
             IList<int> playerRoomIds,
             out ImmutableArray<bool> newPlayersHadTurn,
             out int newCurrentPlayerId,
-            out int newDoctorRoomId,
-            bool wantLog)
+            out int newDoctorRoomId)
         {
             newPlayersHadTurn = PlayersHadTurn.WithVal(CurrentPlayerId, true);
             newDoctorRoomId = Common.Board.NextRoomId(DoctorRoomId, 1);
-
-            if(wantLog)
-            {
-                Console.WriteLine($"  DOCTOR MOVE: from R{DoctorRoomId} to R{newDoctorRoomId}");
-            }
 
             // normal next player progression
             newCurrentPlayerId = (CurrentPlayerId + 1) % Common.NumAllPlayers;
@@ -370,12 +364,6 @@ namespace Kdl.Core
                     if (playerRoomIds[playerId] == newDoctorRoomId)
                     {
                         newCurrentPlayerId = playerId;
-
-                        if (wantLog)
-                        {
-                            Console.WriteLine("  DOCTOR ACTIVATES: " + PlayerText(newCurrentPlayerId));
-                        }
-
                         break;
                     }
                 }
@@ -385,7 +373,8 @@ namespace Kdl.Core
         public PlayerAction BestActionAllowed(
             int currentPlayerId,
             int doctorRoomId,
-            IList<int> playerRoomIds)
+            IList<int> playerRoomIds,
+            bool movedStrangerThatSawCurrentPlayer)
         {
             var seenByOtherPlayers = false;
             var currentPlayerRoomId = playerRoomIds[currentPlayerId];
@@ -404,7 +393,7 @@ namespace Kdl.Core
                 return PlayerAction.None;
             }
 
-            if(currentPlayerRoomId == DoctorRoomId)
+            if(currentPlayerRoomId == DoctorRoomId && !movedStrangerThatSawCurrentPlayer)
             {
                 return PlayerAction.Attack;
             }
@@ -414,100 +403,133 @@ namespace Kdl.Core
                 : PlayerAction.Loot;
         }
 
-        public string NormalTurnHist(bool verbose = false)
+        public string NormalTurnHist()
         {
-            var sb = new StringBuilder();
+            var sb = new StringBuilder("r; ");
             var states = new List<SmallGameState>();
             var stateForTraversal = this;
-
-            string makeMoveText(int activePlayerId, int movingPlayerId, int destRoomId)
-            {
-                var moveText = destRoomId.ToString();
-
-                if(verbose || activePlayerId != movingPlayerId)
-                {
-                    moveText = CommonGameState.ToPlayerDisplayNum(movingPlayerId) + "@" + destRoomId;
-                }
-
-                return moveText;
-            }
 
             while(stateForTraversal != null)
             {
                 states.Add(stateForTraversal);
-                stateForTraversal = stateForTraversal.PreviousGameState;
+                stateForTraversal = stateForTraversal.PrevState;
             }
 
             states.Reverse();
 
             foreach(var state in states.Skip(1))
             {
-                var prevState = state.PreviousGameState;
+                var prevState = state.PrevState;
 
                 if(prevState.CurrentPlayerType == PlayerType.Stranger)
                 {
                     continue;
                 }
 
-                var moveTexts = new List<string>();
-
-                foreach(var playerId in Common.PlayerIds)
-                {
-                    var prevRoomId = prevState.PlayerRoomIds[playerId];
-                    var roomId = state.PlayerRoomIds[playerId];
-
-                    if(prevRoomId != roomId)
-                    {
-                        moveTexts.Add(makeMoveText(prevState.CurrentPlayerId, playerId, roomId));
-                    }
-                }
-
-                if(!moveTexts.Any())
-                {
-                    moveTexts.Add(makeMoveText(
-                        prevState.CurrentPlayerId,
-                        prevState.CurrentPlayerId,
-                        prevState.PlayerRoomIds[prevState.CurrentPlayerId]));
-                }
-
-                if(sb.Length > 0)
-                {
-                    sb.Append(' ');
-                }
-
-                var movePointDiff = state.PlayerMovePoints[prevState.CurrentPlayerId]
-                    - prevState.PlayerMovePoints[prevState.CurrentPlayerId];
-                var didUseMovePoints = movePointDiff < 0;
-                var didLoot = movePointDiff % 1.0 != 0;
-                var didAttack = state.AttackerHist.Length - prevState.AttackerHist.Length != 0;
-
-                if(verbose)
-                {
-                    sb.Append("(" + PlayerText(prevState.CurrentPlayerId));
-
-                    if(didUseMovePoints || didLoot || didAttack)
-                    {
-                        sb.Append(' ');
-
-                        if (didUseMovePoints) sb.Append('M');
-                        if (didLoot) sb.Append('L');
-                        if (didAttack) sb.Append('A');
-                    }
-
-                    sb.Append(") ");
-                }
-
-                sb.Append(string.Join(' ', moveTexts));
-
-                sb.Append(';');
+                sb.Append(state.PrevTurnSummary() + ' ');
             }
 
             var text = sb.ToString();
             return text;
         }
 
+        protected string PrevTurnSummary(bool verbose = false)
+        {
+            // non-verbose summary: (P1MA)1@24(21)
+
+            var prevPlayer = PrevState.CurrentPlayerId;
+            var verboseMoveTexts = new List<string>();
+            var shortMoveTexts = new List<string>();
+            var totalDist = 0;
+
+            foreach(var playerId in Common.PlayerIds)
+            {
+                var prevRoomId = PrevState.PlayerRoomIds[playerId];
+                var roomId = PlayerRoomIds[playerId];
+
+                if(prevRoomId != roomId)
+                {
+                    var dist = Common.Board.Distance[prevRoomId, roomId];
+                    var distText = dist == 0 ? "" : $" ({dist}mp)";
+
+                    totalDist += dist;
+                    shortMoveTexts.Add($"{CommonGameState.ToPlayerDisplayNum(playerId)}@{roomId}({prevRoomId})");
+                    verboseMoveTexts.Add($"    MOVE {PlayerText(playerId)}: R{prevRoomId} to R{roomId}{distText}");
+                }
+            }
+
+            if(!shortMoveTexts.Any())
+            {
+                var roomId = PlayerRoomIds[prevPlayer];
+                shortMoveTexts.Add($"{CommonGameState.ToPlayerDisplayNum(prevPlayer)}@{roomId}({roomId})");
+                verboseMoveTexts.Add($"    MOVE {PlayerText(prevPlayer)}: stayed at R{roomId}");
+            }
+
+            var action = PlayerAction.None;
+
+            if(PrevState.AttackerHist.Length != AttackerHist.Length)
+            {
+                action = PlayerAction.Attack;
+            }
+            else if(PrevState.PlayerMovePoints[prevPlayer] % 1 != PlayerMovePoints[prevPlayer] % 1)
+            {
+                action = PlayerAction.Loot;
+            }
+
+            var moveSignifier = new string('M', Math.Max(0, totalDist - 1));
+            var actionSignifier = action == PlayerAction.None ? "" : action.ToString()[0].ToString();
+
+            var shortSummary
+                = "(" + PlayerText(prevPlayer) + moveSignifier + actionSignifier
+                + ")" + string.Join(' ', shortMoveTexts)
+                + ";";
+
+            if(!verbose)
+            {
+                return shortSummary;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append($"  Turn{PrevState.TurnId}, Ply{PrevState.Ply()}, {shortSummary}");
+            verboseMoveTexts.ForEach(x => sb.Append('\n' + x));
+
+            if(action == PlayerAction.Loot)
+            {
+                sb.Append($"\n    LOOT {PlayerText(prevPlayer)}: now " + PlayerMovePoints[prevPlayer] + "mp");
+            }
+            else if(action == PlayerAction.Attack)
+            {
+                sb.Append($"\n    ATTACK: hist=" + string.Join(',', AttackerHist.Select(CommonGameState.ToPlayerDisplayNum)));
+            }
+
+            sb.Append($"\n    DR MOVE: R{PrevState.DoctorRoomId} to R{DoctorRoomId}");
+
+            if(DoctorRoomId == PlayerRoomIds[CurrentPlayerId])
+            {
+                var otherPlayersInRoom = Common.PlayerIds
+                    .Where(pid => pid != CurrentPlayerId && PlayerRoomIds[pid] == DoctorRoomId)
+                    .Select(CommonGameState.ToPlayerDisplayNum);
+                var unactivatedPlayersText = otherPlayersInRoom.Any()
+                    ? ", unactivated players{" + string.Join(',', otherPlayersInRoom) + "}"
+                    : "";
+                sb.Append($"\n    DR ACTIVATE: {PlayerText()}{unactivatedPlayersText}");
+            }
+
+            //if(Common.GetPlayerType(CurrentPlayerId) == PlayerType.Normal)
+            {
+                sb.Append("\n    start of next turn...\n");
+                sb.Append(StateSummary(Util.Print.Indentation(3)));
+            }
+
+            return sb.ToString();
+        }
+
+        public static long AppraiseExecCount = 0;
+
         public AppraisedPlayerMove Appraise(int analysisPlayerId, int analysisLevel)
         {
+            AppraiseExecCount++;
+
             if(analysisLevel == 0)
             {
                 var attackScore = AttackScore(analysisPlayerId, out var gainFromAttackingNext);
@@ -527,8 +549,9 @@ namespace Kdl.Core
                     + 0.15 * isCurrentPlayerBonus
                     + 0.10 * doctorBonus
                     + 0.05 * connectednessRatio;
+                var opponentBasedFuzzyMultiplier = Common.NumNormalPlayers == 2 ? 0.5 : 1;
 
-                var appraisal = attackScore + gainFromAttackingNext * fuzzyGoodnessRatio;
+                var appraisal = attackScore + opponentBasedFuzzyMultiplier * gainFromAttackingNext * fuzzyGoodnessRatio;
                 return new AppraisedPlayerMove(appraisal);
             }
 
@@ -558,6 +581,7 @@ namespace Kdl.Core
                             analysisPlayerId,
                             analysisLevel - 1);
 
+//#error TODO: have current player maximize their own appraisal, but re-appraise for analysisPlayer?
                         if (appraisalIsForCurrentPlayer)
                         {
                             if(bestMove.Appraisal < hypoAppraisedMove.Appraisal)

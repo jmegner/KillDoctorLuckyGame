@@ -3,8 +3,19 @@ using System.Collections.Immutable;
 
 namespace Kdl.Core
 {
-    public record SimpleTurn(ImmutableArray<PlayerMove> Moves)
+
+    public record SimpleTurn(ImmutableArray<PlayerMove> Moves) : ITurn
     {
+        public SimpleTurn()
+            : this(ImmutableArray.Create<PlayerMove>(new PlayerMove(RuleHelper.InvalidPlayerId, 0)))
+        {
+        }
+
+        public SimpleTurn(int playerId, int destRoomId)
+            : this(ImmutableArray.Create<PlayerMove>(new PlayerMove(playerId, destRoomId)))
+        {
+        }
+
         public SimpleTurn(PlayerMove move)
             : this(ImmutableArray.Create<PlayerMove>(move))
         {

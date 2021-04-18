@@ -9,10 +9,24 @@ namespace Kdl.Core
 {
     public class RuleHelper
     {
-        public class SuperSimple
+        public class Simple
         {
-            public const int PlayerStartingMovePoints = 2;
-            public const double MovePointsPerLoot = 1.0 / 2.0;
+            public const double JustOverOneThird = 11.0 / 32.0;
+
+            public const double PlayerStartingMoveCards = 1.0; //2.5;
+            public const double MoveCardsPerLoot = JustOverOneThird;
+            public const double CloversPerMoveCard = 1.0;
+
+            public const double PlayerStartingWeapons = 2.0;
+            public const double WeaponsPerLoot = JustOverOneThird;
+            public const double StrengthPerWeapon = 53.0 / 24.0;
+            public const double CloversPerWeapon = 1.0;
+
+            public const double PlayerStartingFailures = 2.0;
+            public const double FailuresPerLoot = JustOverOneThird;
+            public const double CloversPerFailure = 50.0 / 24.0;
+
+            public const double CloversContributedPerStranger = 1.0;
 
             public static double Score(
                 int scoringPlayerId,
@@ -44,14 +58,14 @@ namespace Kdl.Core
                 foreach(var attackerPlayerId in attackers)
                 {
                     // 'attacker side' is just the corresponding normal player id to take care of allied strangers
-                    var attackerSideId = RuleHelper.ToNormalPlayerId(attackerPlayerId, numNormalPlayers);
+                    var attackerSideId = ToNormalPlayerId(attackerPlayerId, numNormalPlayers);
                     var sign = attackerSideId == scoringPlayerId ? 1.0 : -1.0 / (numNormalPlayers - 1);
 
                     score += sign * attackerSideWeights[attackerSideId] * playerStrengths[attackerPlayerId];
                     playerStrengths[attackerPlayerId]++;
 
                     // right now just weaken last normal player to defend the attack
-                    var weakenedSideId = numNormalPlayers == RuleHelper.NumNormalPlayersWhenHaveStrangers
+                    var weakenedSideId = numNormalPlayers == NumNormalPlayersWhenHaveStrangers
                         ? 2 - attackerSideId
                         : (attackerSideId - 1).PositiveRemainder(numAllPlayers);
 
@@ -64,11 +78,22 @@ namespace Kdl.Core
 
         }
 
+        public const int PlayerStartingStrength = 1;
         public const int NormalPlayerNumStartingCards = 6;
         public const int NumNormalPlayersWhenHaveStrangers = 2;
         public const int NumAllPlayersWhenHaveStrangers = 4;
+
+        public const int InvalidPlayerId = -1;
+
+        public const int NormalPlayerIdFirst = 0;
         public const int StrangerPlayerIdFirst = 1;
+        public const int NormalPlayerIdSecond = 2;
         public const int StrangerPlayerIdSecond = 3;
+
+        public const int SideANormalPlayerId = 0;
+        public const int SideBStrangerPlayerId = 1;
+        public const int SideBNormalPlayerId = 2;
+        public const int SideAStrangerPlayerId = 3;
 
         public RuleFlags RuleFlags { get; set; }
 
@@ -98,15 +123,36 @@ namespace Kdl.Core
         public static int NumAllPlayers(int numNormalPlayers)
             => numNormalPlayers == NumNormalPlayersWhenHaveStrangers ? NumAllPlayersWhenHaveStrangers : numNormalPlayers;
 
-        public static int ToNormalPlayerId(int playerId, int numNormalPlayers)
+        public static int ToNormalPlayerId(int playerId, int numNormalPlayers = NumNormalPlayersWhenHaveStrangers)
         {
             if(numNormalPlayers != NumNormalPlayersWhenHaveStrangers)
             {
                 return playerId;
             }
 
-            return (playerId == 0 || playerId == 3) ? 0 : 2;
+            return (playerId == SideANormalPlayerId || playerId == SideAStrangerPlayerId)
+                ? SideANormalPlayerId : SideBNormalPlayerId;
         }
+
+        // only for two-player games
+        public static int AlliedStranger(int playerId)
+            => playerId switch
+            {
+                SideANormalPlayerId   => SideAStrangerPlayerId,
+                SideAStrangerPlayerId => SideAStrangerPlayerId,
+                SideBNormalPlayerId   => SideBStrangerPlayerId,
+                SideBStrangerPlayerId => SideBStrangerPlayerId,
+                _ => RuleHelper.InvalidPlayerId,
+            };
+
+        // only for two-player games
+        public static int OpposingNormalPlayer(int playerId)
+            => playerId == SideANormalPlayerId || playerId == SideAStrangerPlayerId
+            ? SideBNormalPlayerId : SideANormalPlayerId;
+
+        // only for two-player games
+        public static int OpposingStranger(int playerId)
+            => AlliedStranger(OpposingNormalPlayer(playerId));
 
     }
 }

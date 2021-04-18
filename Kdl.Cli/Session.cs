@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using CommandLine;
 using Kdl.Core;
+using Util;
 
 namespace Kdl.Cli
 {
@@ -18,14 +21,20 @@ namespace Kdl.Cli
         string[] CliArgs { get; set; }
         Random Rng { get; set; } = new Random(1);
         int NumNormalPlayers { get; set; } = 2;
+        int NumNormalPlayersOld { get; set; }
         string DeckName { get; set; } = "DeckStandard";
-        string BoardName { get; set; } = "BoardMain";
-        List<string> ClosedWingNames { get; set; } = new() { "west" };
+        string DeckNameOld { get; set; }
+        string BoardName { get; set; } = "BoardAltDown"; //"BoardMain";
+        string BoardNameOld { get; set; }
+        List<string> ClosedWingNames { get; set; } = new() { }; //{ "west" };
+        List<string> ClosedWingNamesOld { get; set; }
         RuleFlags Rules { get; set; } = RuleFlags.SuperSimple;
         CommonGameState GameCommon { get; set; }
-        SmallGameState Game { get; set; }
+        ImmutableGameState Game { get; set; }
         bool ShouldQuit { get; set; }
-        int AnalysisLevel { get; set; }
+        int AnalysisLevel { get; set; } = (int)1e6;
+        SimpleTurn RecentAnalyzedTurn { get; set; }
+        Mcts<SimpleTurn,ImmutableGameState> Mcts { get; set; }
 
         string BoardPath => JsonFilePath(BoardName);
         string DeckPath => JsonFilePath(DeckName);
@@ -39,6 +48,7 @@ namespace Kdl.Cli
 
         public void Start()
         {
+            Fiddle(null);
             ResetGame();
             InterpretationLoop();
         }
@@ -60,7 +70,6 @@ namespace Kdl.Cli
                     }
                 }
             }
-
         }
 
         protected string WithoutComments(string directive)
@@ -86,6 +95,24 @@ namespace Kdl.Cli
             return directive;
         }
 
+        const string TagFiddle = "f";
+        const string TagQuit = "q";
+        const string TagDisplay = "d";
+        const string TagReset = "r";
+        const string TagHistory = "h";
+        const string TagUndo = "u";
+        const string TagAnalyze = "a";
+        const string TagAnalyzeAscending = "aa";
+        const string TagMctsAnalysis = "m";
+        const string TagExecuteAnalysis = "x";
+        const string TagExecutePreviousAnalysis = "xp";
+        const string TagBoard = "b";
+        const string TagBoardLong = "board";
+        const string TagPlayers = "p";
+        const string TagPlayersLong = "numplayers";
+        const string TagClosedWings = "w";
+        const string TagClosedWingsLong = "closedwings";
+
         protected void InterpretDirective(string directive)
         {
             directive = WithoutComments(directive);
@@ -96,21 +123,42 @@ namespace Kdl.Cli
             {
                 // deliberately nothing
             }
-            else if (directiveTag == "q")
+            else if (directiveTag == TagQuit)
             {
                 ShouldQuit = true;
             }
-            else if (directiveTag == "d")
+            else if (directiveTag == TagFiddle)
             {
+                Fiddle(tokens);
+            }
+            else if (directiveTag == TagDisplay)
+            {
+                PrintGameSettings();
                 Console.WriteLine(Game.Summary(1));
             }
-            else if (directiveTag == "r")
+            else if (directiveTag == TagReset)
             {
-                Console.WriteLine("RESET");
+                Console.WriteLine("(RESET)");
                 ResetGame();
             }
-            else if (directiveTag == "h")
+            else if (directiveTag == TagUndo)
             {
+                Console.WriteLine("(UNDO)");
+
+                do
+                {
+                    Game = Game.PrevState;
+                } while (!Game.IsNormalTurn);
+
+                Console.WriteLine(Game.Summary(1));
+            }
+            else if (directiveTag == TagHistory)
+            {
+                Console.WriteLine(TagPlayers + " " + NumNormalPlayersOld + ";");
+                Console.WriteLine(TagBoard + " " + BoardNameOld + ";");
+                Console.WriteLine(TagClosedWings + " " + string.Join(' ', ClosedWingNamesOld) + ";");
+                Console.Write(TagReset + "; ");
+
                 if (tokens.Length >= 2 && bool.TryParse(tokens[1], out var verbose))
                 {
                     // verbose option not implemented yet
@@ -121,26 +169,50 @@ namespace Kdl.Cli
                     Console.WriteLine(Game.NormalTurnHist());
                 }
             }
-            else if (directiveTag == "a"
-             || directiveTag == "x")
+            else if (directiveTag == TagAnalyze
+             || directiveTag == TagAnalyzeAscending
+             || directiveTag == TagMctsAnalysis
+             || directiveTag == TagExecuteAnalysis
+             )
             {
                 if (tokens.Length >= 2 && int.TryParse(tokens[1], out var analysisLevel))
                 {
                     AnalysisLevel = analysisLevel;
                 }
 
-                var playerId = Game.CurrentPlayerId;
-
-                if (tokens.Length >= 3 && int.TryParse(tokens[2], out var playerDisplayNum))
+                if (!(tokens.Length >= 3 && int.TryParse(tokens[2], out var numTopResults)))
                 {
-                    playerId = CommonGameState.ToPlayerId(playerDisplayNum);
+                    numTopResults = 10;
                 }
 
-                bool doSuggestedMove = directiveTag == "x";
+                bool doSuggestedMove = directiveTag == TagExecuteAnalysis;
 
-                Analyze(doSuggestedMove, AnalysisLevel, playerId);
+                if(directiveTag == TagMctsAnalysis)
+                {
+                    AnalyzeMcts(doSuggestedMove, AnalysisLevel, numTopResults);
+                }
+                else
+                {
+                    var startingAnalysisLevel = directiveTag == TagAnalyzeAscending ? 0 : AnalysisLevel;
+
+                    for(int level = startingAnalysisLevel; level <= AnalysisLevel; level++)
+                    {
+                        Analyze(doSuggestedMove, level);
+                    }
+                }
             }
-            else if (directiveTag == "b" || directiveTag == "board")
+            else if (directiveTag == TagExecutePreviousAnalysis)
+            {
+                if(RecentAnalyzedTurn != null)
+                {
+                    DoMoves(RecentAnalyzedTurn);
+                }
+                else
+                {
+                    Console.WriteLine("no recent analyzed move");
+                }
+            }
+            else if (directiveTag == TagBoard || directiveTag == TagBoardLong)
             {
                 if(tokens.Length != 2)
                 {
@@ -150,12 +222,15 @@ namespace Kdl.Cli
                 {
                     BoardName = tokens[1];
                 }
+
+                PrintGameSettings();
             }
-            else if (directiveTag == "w" || directiveTag == "wingsclosed")
+            else if (directiveTag == TagClosedWings || directiveTag == TagClosedWingsLong)
             {
                 ClosedWingNames = tokens.Skip(1).ToList();
+                PrintGameSettings();
             }
-            else if (directiveTag == "p" || directiveTag == "numplayers")
+            else if (directiveTag == TagPlayers || directiveTag == TagPlayersLong)
             {
                 var newVal = NumNormalPlayers;
                 if(tokens.Length != 2 || !int.TryParse(tokens[1], out newVal))
@@ -166,6 +241,8 @@ namespace Kdl.Cli
                 {
                     NumNormalPlayers = newVal;
                 }
+
+                PrintGameSettings();
             }
             else if(char.IsDigit(directiveTag.FirstOrDefault()))
             {
@@ -192,28 +269,139 @@ namespace Kdl.Cli
             }
         }
 
-        protected void Analyze(bool doSuggestedMove, int analysisLevel, int playerId)
+        void Fiddle(IList<string> tokens)
         {
-            SmallGameState.AppraiseExecCount = 0;
+            /*
+            var random = new Random(7);
+            var numStates = 5;
+            var hist = new int[numStates];
+            var numIters = (int)1e6;
+
+            foreach(var i in numIters.ToRange())
+            {
+                var desiredExponentialWeightSum = random.NextDouble();
+                const double exponentialDecayFactor = 0.9;
+                var stateIdx
+                    = (int)(Math.Log(
+                        1 + desiredExponentialWeightSum
+                        * (Math.Pow(exponentialDecayFactor, numStates) - 1))
+                    / Math.Log(exponentialDecayFactor));
+                hist[stateIdx]++;
+            }
+
+            var decays = (numStates - 1).ToRange().Select(i => ((double)hist[i + 1]) / hist[i]);
+            Console.WriteLine("decays: " + string.Join(", ", decays));
+            */
+        }
+
+        protected void PrintGameSettings()
+        {
+            Console.WriteLine($"  NormalPlayers(p): {NumNormalPlayers}");
+            Console.WriteLine($"  Board(b):         {BoardName}");
+            Console.WriteLine($"  ClosedWings(w):   {string.Join(", ", ClosedWingNames)}");
+            Console.WriteLine($"  AnalysisLevel(a): {AnalysisLevel}");
+        }
+
+        T RunCancellableFunc<T>(Func<T> func, CancellationTokenSource cancelSource, bool printNotice = false)
+        {
+            if(printNotice)
+            {
+                Console.WriteLine("Press any key to cancel...");
+            }
+
+            var calcTask = Task.Run(func);
+
+            while(!calcTask.IsCompleted)
+            {
+                if(Console.KeyAvailable)
+                {
+                    _ = Console.ReadKey(true);
+
+                    if(printNotice)
+                    {
+                        Console.WriteLine("Cancelling...");
+                    }
+
+                    cancelSource.Cancel();
+                }
+                else
+                {
+                    Thread.Sleep(1);
+                }
+            }
+
+            return calcTask.Result;
+        }
+
+        protected void Analyze(bool doSuggestedMove, int analysisLevel)
+        {
+            var cancelSource = new CancellationTokenSource();
+
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var appraisedMove = Game.Appraise(playerId, analysisLevel);
+            var appraisedMove = RunCancellableFunc(
+                () => Game.Appraise(Game.CurrentPlayerId, analysisLevel, cancelSource.Token),
+                cancelSource,
+                false);
             watch.Stop();
+
+            RecentAnalyzedTurn = new SimpleTurn(appraisedMove.Move);
+
             Console.WriteLine(
                 "bestMove=" + appraisedMove.Move
                 + ", level=" + analysisLevel
                 + ", appraisal=" + appraisedMove.Appraisal.ToString("N4")
                 + ", timeMs=" + watch.ElapsedMilliseconds
-                + ", states=" + SmallGameState.AppraiseExecCount.ToString("N0")
                 );
 
-            if(doSuggestedMove)
+            if(doSuggestedMove && !cancelSource.IsCancellationRequested)
             {
-                DoMoves(new[] { appraisedMove.Move });
+                DoMoves(new SimpleTurn(appraisedMove.Move));
+            }
+        }
+
+        protected void AnalyzeMcts(bool doSuggestedMove, double analysisSeconds, int numTopResults)
+        {
+            var cancelSource = new CancellationTokenSource(TimeSpan.FromSeconds(analysisSeconds));
+
+            if(Mcts == null)
+            {
+                Mcts = new Mcts<SimpleTurn,ImmutableGameState>(Game, new Random(1));
+            }
+            else
+            {
+                Mcts.Reroot(Game);
+            }
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var topNodes = RunCancellableFunc(
+                () => Mcts.GetTopTurns(cancelSource.Token),
+                cancelSource,
+                false);
+            watch.Stop();
+
+            Console.WriteLine($"MCTS: t={watch.Elapsed.TotalSeconds:F1}, n={Mcts.NumNodes}");
+
+            foreach(var node in topNodes.Take(numTopResults))
+            {
+                Console.WriteLine("  " + node);
+            }
+
+            RecentAnalyzedTurn = topNodes.FirstOrDefault()?.TurnTaken;
+
+            if(doSuggestedMove && RecentAnalyzedTurn != null && !cancelSource.IsCancellationRequested)
+            {
+                DoMoves(RecentAnalyzedTurn);
             }
         }
 
         protected void DoMoves(IList<string> tokens)
         {
+            if(Game.HasWinner)
+            {
+                Console.WriteLine($"{Game.PlayerText(Game.Winner)} won already.  Moves not accepted.");
+                return;
+            }
+
             var moves = new List<PlayerMove>();
             bool hasParseErrors = false;
 
@@ -246,15 +434,17 @@ namespace Kdl.Cli
 
             if (!hasParseErrors)
             {
-                DoMoves(moves);
+                DoMoves(new SimpleTurn(moves));
             }
         }
 
-        protected void DoMoves(IEnumerable<PlayerMove> moves)
+        protected void DoMoves(SimpleTurn turn)
         {
-            if (Game.CheckNormalTurn(moves, out var errorMsg))
+            RecentAnalyzedTurn = null;
+
+            if (Game.CheckNormalTurn(turn, out var errorMsg))
             {
-                Game = Game.AfterNormalTurn(moves, true);
+                Game = Game.AfterNormalTurn(turn, true);
             }
             else
             {
@@ -278,7 +468,12 @@ namespace Kdl.Cli
                     board,
                     NumNormalPlayers);
 
-                Game = SmallGameState.AtStart(GameCommon);
+                Game = ImmutableGameState.AtStart(GameCommon);
+
+                BoardNameOld = BoardName;
+                DeckNameOld = DeckName;
+                NumNormalPlayersOld = NumNormalPlayers;
+                ClosedWingNamesOld = ClosedWingNames;
             }
             catch(Exception e)
             {
@@ -295,6 +490,7 @@ namespace Kdl.Cli
 
             if (result)
             {
+                PrintGameSettings();
                 Console.WriteLine(Game.Summary(1));
             }
             else
@@ -309,6 +505,9 @@ namespace Kdl.Cli
             return result;
         }
 
-        protected string UserPromptText() => Game.PlayerText() + "> ";
+        protected string UserPromptText()
+            => Game.HasWinner
+            ? Game.PlayerText(Game.Winner) + " WON> "
+            : Game.PlayerText() + "> ";
     }
 }

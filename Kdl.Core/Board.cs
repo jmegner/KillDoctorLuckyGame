@@ -180,13 +180,11 @@ namespace Kdl.Core
 
         public bool IsValid(out List<string> mistakes)
         {
-            bool isValid = true;
             mistakes = new();
 
             if(PlayerStartRoomId <= 0 || DoctorStartRoomId <= 0 || CatStartRoomId <= 0 || DogStartRoomId <= 0)
             {
                 mistakes.Add("bad start room id");
-                isValid = false;
             }
 
             foreach(var room in Rooms.Values)
@@ -194,11 +192,22 @@ namespace Kdl.Core
                 if(room.Adjacent.Contains(room.Id))
                 {
                     mistakes.Add($"room {room.Id} is in own adjacent list");
-                    isValid = false;
                 }
                 if(room.Visible.Contains(room.Id))
                 {
                     mistakes.Add($"room {room.Id} is in own visible list");
+                }
+
+                var nonexistentAdjacentRooms = room.Adjacent.Where(adjRoomId => !RoomIds.Contains(adjRoomId));
+                if(nonexistentAdjacentRooms.Any())
+                {
+                    mistakes.Add($"room {room.Id} lists nonexistent adjacent rooms {string.Join(", ", nonexistentAdjacentRooms)}");
+                }
+
+                var nonexistentVisibleRooms = room.Visible.Where(visibleRoomId => !RoomIds.Contains(visibleRoomId));
+                if(nonexistentVisibleRooms.Any())
+                {
+                    mistakes.Add($"room {room.Id} lists nonexistent adjacent rooms {string.Join(", ", nonexistentVisibleRooms)}");
                 }
             }
 
@@ -211,18 +220,16 @@ namespace Kdl.Core
                     if(Adjacency[r1, r2] != Adjacency[r2, r1])
                     {
                         mistakes.Add($"Adjacency[{r1},{r2}] contradiction");
-                        isValid = false;
                     }
 
                     if(Sight[r1, r2] != Sight[r2, r1])
                     {
                         mistakes.Add($"Visibility[{r1},{r2}] contradiction");
-                        isValid = false;
                     }
                 }
             }
 
-            return isValid;
+            return !mistakes.Any();
         }
 
         public bool RoomIsSeenBy(int roomOfConcern, IEnumerable<int> roomsWithOtherPeople)
@@ -234,6 +241,15 @@ namespace Kdl.Core
             var nextIdx = (idx + delta).PositiveRemainder(RoomIds.Count());
             var nextRoomId = RoomIds[nextIdx];
             return nextRoomId;
+        }
+
+        public List<int> RoomIdsInDoctorVisitOrder(int startRoomId)
+        {
+            var startIdx = RoomIds.IndexOf(startRoomId);
+            var roomIds = RoomIds.Length.ToRange()
+                .Select(i => RoomIds[(startIdx + i) % RoomIds.Length])
+                .ToList();
+            return roomIds;
         }
 
         #endregion

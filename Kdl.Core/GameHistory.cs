@@ -31,7 +31,7 @@ namespace Kdl.Core
 
         public double Score(int myPlayerId, int numNormalPlayers)
         {
-            return RuleHelper.SuperSimple.Score(myPlayerId, numNormalPlayers, Attackers);
+            return RuleHelper.Simple.Score(myPlayerId, numNormalPlayers, Attackers);
 
         }
 

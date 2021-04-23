@@ -49,7 +49,7 @@ namespace Kdl.Core
             var appraisalIsForCurrentPlayer = analysisPlayerId == currState.CurrentPlayerId;
             var bestTurn = new AppraisedPlayerTurn<TTurn,TGameState>(double.MinValue, default, default);
             var turns = currState.PossibleTurns();
-            var childStates = turns.Select(turn => currState.AfterTurn(turn));
+            var childStates = turns.Select(turn => currState.AfterTurn(turn, true));
 
             if(descendProportion < 1.0 && analysisLevel > 1)
             {

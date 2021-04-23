@@ -9,46 +9,71 @@ using Util;
 
 namespace Kdl.Core
 {
-
-    public record ImmutableGameState(
-        CommonGameState Common,
-        int TurnId,
-        int CurrentPlayerId,
-        int DoctorRoomId,
-        ImmutableArray<int> PlayerRoomIds,
-        ImmutableArray<bool> PlayersHadTurn,
-        ImmutableArray<double> PlayerMoveCards,
-        ImmutableArray<double> PlayerWeapons,
-        ImmutableArray<double> PlayerFailures,
-        ImmutableArray<int> PlayerStrengths,
-        ImmutableArray<int> AttackerHist,
-        int Winner,
-        SimpleTurn PrevTurn,
-        ImmutableGameState PrevState)
-        : IGameState<SimpleTurn,ImmutableGameState>
+    public class MutableGameState
+        : IGameState<SimpleTurn,MutableGameState>, IEquatable<MutableGameState>
     {
-        public static ImmutableGameState AtStart(CommonGameState common)
+        public CommonGameState Common { get; init; }
+        public int TurnId { get; set; }
+        public int CurrentPlayerId { get; set; }
+        public int DoctorRoomId { get; set; }
+        public int[] PlayerRoomIds { get; set; }
+        public bool[] PlayersHadTurn { get; set; }
+        public double[] PlayerMoveCards { get; set; }
+        public double[] PlayerWeapons { get; set; }
+        public double[] PlayerFailures { get; set; }
+        public int[] PlayerStrengths { get; set; }
+        public List<int> AttackerHist { get; set; }
+        public int Winner { get; set; }
+        public SimpleTurn PrevTurn { get; set; }
+        public MutableGameState PrevState { get; set; }
+
+        public static MutableGameState AtStart(CommonGameState common)
         {
-            ImmutableArray<T> playerVals<T>(T val) => common.NumAllPlayers.Times(val).ToImmutableArray();
-            var game = new ImmutableGameState(
-                Common:           common,
-                TurnId:           1,
-                CurrentPlayerId:  0,
-                DoctorRoomId:     common.Board.DoctorStartRoomId,
-                PlayerRoomIds:    playerVals(common.Board.PlayerStartRoomId),
-                PlayersHadTurn:   playerVals(false),
-                PlayerMoveCards:  playerVals(RuleHelper.Simple.PlayerStartingMoveCards),
-                PlayerWeapons:    playerVals(RuleHelper.Simple.PlayerStartingWeapons),
-                PlayerFailures:   playerVals(RuleHelper.Simple.PlayerStartingFailures),
-                PlayerStrengths:  playerVals(RuleHelper.PlayerStartingStrength),
-                AttackerHist:     ImmutableArray<int>.Empty,
-                Winner:           RuleHelper.InvalidPlayerId,
-                PrevTurn:         new SimpleTurn(0, 0),
-                PrevState:        null);
+            T[] playerVals<T>(T val) => common.NumAllPlayers.Times(val).ToArray();
+            var game = new MutableGameState()
+            {
+                Common = common,
+                TurnId = 1,
+                CurrentPlayerId = 0,
+                DoctorRoomId = common.Board.DoctorStartRoomId,
+                PlayerRoomIds = playerVals(common.Board.PlayerStartRoomId),
+                PlayersHadTurn = playerVals(false),
+                PlayerMoveCards = playerVals(RuleHelper.Simple.PlayerStartingMoveCards),
+                PlayerWeapons = playerVals(RuleHelper.Simple.PlayerStartingWeapons),
+                PlayerFailures = playerVals(RuleHelper.Simple.PlayerStartingFailures),
+                PlayerStrengths = playerVals(RuleHelper.PlayerStartingStrength),
+                AttackerHist = new(),
+                Winner = RuleHelper.InvalidPlayerId,
+                PrevTurn = new SimpleTurn(0, 0),
+                PrevState = null,
+            };
             return game;
         }
 
-        public virtual bool Equals(ImmutableGameState other)
+        public MutableGameState Copy()
+        {
+            return new MutableGameState()
+            {
+                Common = Common,
+                TurnId = TurnId,
+                CurrentPlayerId = CurrentPlayerId,
+                DoctorRoomId = DoctorRoomId,
+                PlayerRoomIds = PlayerRoomIds.ToArray(),
+                PlayersHadTurn = PlayersHadTurn.ToArray(),
+                PlayerMoveCards = PlayerMoveCards.ToArray(),
+                PlayerWeapons = PlayerWeapons.ToArray(),
+                PlayerFailures = PlayerFailures.ToArray(),
+                PlayerStrengths = PlayerStrengths.ToArray(),
+                AttackerHist = AttackerHist.ToList(),
+                Winner = Winner,
+                PrevTurn = PrevTurn,
+                PrevState = PrevState,
+            };
+        }
+
+        public override bool Equals(object other) => Equals(other as MutableGameState);
+
+        public bool Equals(MutableGameState other)
         {
             return other != null
                 && Common.Equals(other.Common)
@@ -80,9 +105,7 @@ namespace Kdl.Core
             + "DS=" + DoctorScore().ToString("F3")
             ;
 
-        public ImmutableGameState Copy() => this;
-        public bool IsMutable => false;
-
+        public bool IsMutable => true;
         public bool HasWinner => Winner != RuleHelper.InvalidPlayerId;
         public bool IsNormalTurn => Common.GetPlayerType(CurrentPlayerId) == PlayerType.Normal;
 
@@ -105,7 +128,6 @@ namespace Kdl.Core
         }
 
         public PlayerType CurrentPlayerType => Common.GetPlayerType(CurrentPlayerId);
-
         public string PlayerText() => PlayerText(CurrentPlayerId);
         public string PlayerText(int playerId) => Common.PlayerText(playerId);
 
@@ -120,6 +142,9 @@ namespace Kdl.Core
                     + ",F" + PlayerFailures[playerId].ToString("N1")
                 )
             + ")";
+
+        public bool PlayerSeesPlayer(int playerId1, int playerId2)
+            => Common.Board.Sight[PlayerRoomIds[playerId1], PlayerRoomIds[playerId2]];
 
         public double NumDefensiveClovers()
         {
@@ -238,214 +263,142 @@ namespace Kdl.Core
             return true;
         }
 
-        public ImmutableGameState AfterTurn(SimpleTurn turn, bool mustReturnNewObject) => AfterNormalTurn(turn);
+        public MutableGameState AfterTurn(SimpleTurn turn, bool mustReturnNewObject)
+            => (mustReturnNewObject ? Copy() : this).AfterNormalTurn(turn);
 
-        public ImmutableGameState AfterNormalTurn(SimpleTurn turn, bool wantLog = false)
+        public MutableGameState AfterNormalTurn(SimpleTurn turn, bool wantLog = false)
         {
             // no turn validity checking; that is done in other method
+            if(wantLog)
+            {
+                PrevState = Copy();
+            }
+
+            PrevTurn = turn;
+            TurnId++;
 
             // move phase ======================================================
 
             var totalDist = turn.Moves.Sum(move => Common.Board.Distance[PlayerRoomIds[move.PlayerId], move.DestRoomId]);
-            var moveCardsSpent = Math.Max(0, totalDist - 1);
-            var newPlayerMoveCards = PlayerMoveCards.IncrementVal(CurrentPlayerId, -moveCardsSpent);
+            var moveCardsUsed = Math.Max(0, totalDist - 1);
+            PlayerMoveCards[CurrentPlayerId] -= moveCardsUsed;
 
-            ImmutableArray<int>.Builder newPlayerRoomIdsBuilder = null;
-
-            bool movedStrangerThatSawCurrentDoctor = false;
+            bool movedStrangerThatSawDoctor = false;
 
             foreach(var move in turn.Moves)
             {
-                if(newPlayerRoomIdsBuilder == null)
-                {
-                    newPlayerRoomIdsBuilder = PlayerRoomIds.ToBuilder();
-                }
-
-                newPlayerRoomIdsBuilder[move.PlayerId] = move.DestRoomId;
-
                 if(move.PlayerId != CurrentPlayerId && Common.Board.Sight[PlayerRoomIds[move.PlayerId], DoctorRoomId])
                 {
-                    movedStrangerThatSawCurrentDoctor = true;
+                    movedStrangerThatSawDoctor = true;
                 }
+
+                PlayerRoomIds[move.PlayerId] = move.DestRoomId;
             }
 
             // action phase (attack or loot) ===================================
 
-            var newPlayerWeapons = PlayerWeapons;
-            var newPlayerFailures = PlayerFailures;
-            var newPlayerStrengths = PlayerStrengths;
-            var newAttackerHist = AttackerHist;
-            var newWinner = RuleHelper.InvalidPlayerId;
-
-            var action = BestActionAllowed(
-                CurrentPlayerId,
-                DoctorRoomId,
-                newPlayerRoomIdsBuilder,
-                movedStrangerThatSawCurrentDoctor);
+            var action = BestActionAllowed(movedStrangerThatSawDoctor);
 
             if(action == PlayerAction.Attack)
             {
-                if(ProcessAttack(
-                    ref newPlayerMoveCards,
-                    ref newPlayerWeapons,
-                    ref newPlayerFailures,
-                    ref newPlayerStrengths,
-                    ref newAttackerHist))
+                if(ProcessAttack())
                 {
-                    newWinner = CurrentPlayerId;
+                    Winner = CurrentPlayerId;
                 }
-
             }
             else if(action == PlayerAction.Loot)
             {
-                newPlayerMoveCards = newPlayerMoveCards.IncrementVal(CurrentPlayerId, RuleHelper.Simple.MoveCardsPerLoot);
-                newPlayerWeapons = newPlayerWeapons.IncrementVal(CurrentPlayerId, RuleHelper.Simple.WeaponsPerLoot);
-                newPlayerFailures = newPlayerFailures.IncrementVal(CurrentPlayerId, RuleHelper.Simple.FailuresPerLoot);
+                PlayerMoveCards[CurrentPlayerId] += RuleHelper.Simple.MoveCardsPerLoot;
+                PlayerWeapons[CurrentPlayerId] += RuleHelper.Simple.WeaponsPerLoot;
+                PlayerFailures[CurrentPlayerId] += RuleHelper.Simple.FailuresPerLoot;
             }
 
             // doctor phase ====================================================
-            ImmutableArray<bool> newPlayersHadTurn;
-            int newCurrentPlayerId;
-            int newDoctorRoomId;
 
-            if(newWinner == RuleHelper.InvalidPlayerId)
+            if(!HasWinner)
             {
-                DoDoctorPhase(
-                    newPlayerRoomIdsBuilder,
-                    out newPlayersHadTurn,
-                    out newCurrentPlayerId,
-                    out newDoctorRoomId);
+                DoDoctorPhase();
             }
-            else
-            {
-                newPlayersHadTurn = PlayersHadTurn;
-                newCurrentPlayerId = CurrentPlayerId;
-                newDoctorRoomId = DoctorRoomId;
-            }
-
 
             // wrap-up phase ===================================================
-            var newState = new ImmutableGameState(
-                    Common:           Common,
-                    TurnId:           TurnId + 1,
-                    CurrentPlayerId:  newCurrentPlayerId,
-                    DoctorRoomId:     newDoctorRoomId,
-                    PlayerRoomIds:    newPlayerRoomIdsBuilder.MoveToImmutable(),
-                    PlayersHadTurn:   newPlayersHadTurn,
-                    PlayerMoveCards:  newPlayerMoveCards,
-                    PlayerWeapons:    newPlayerWeapons,
-                    PlayerFailures:   newPlayerFailures,
-                    PlayerStrengths:  newPlayerStrengths,
-                    AttackerHist:     newAttackerHist,
-                    Winner:           newWinner,
-                    PrevTurn:         turn,
-                    PrevState:        this);
 
             if(wantLog)
             {
-                Console.WriteLine(newState.PrevTurnSummary(true));
+                Console.WriteLine(PrevTurnSummary(true));
             }
 
-            if(!newState.HasWinner && !newState.IsNormalTurn)
+            if(!HasWinner && !IsNormalTurn)
             {
                 // could avoid newState allocation and pass underlying variables directly
-                return newState.AfterStrangerTurn(turn, wantLog);
+                return AfterStrangerTurn(turn, wantLog);
             }
 
-            return newState;
+            return this;
         }
 
-        public ImmutableGameState AfterStrangerTurn(SimpleTurn normalTurn, bool wantLog)
+        public MutableGameState AfterStrangerTurn(SimpleTurn normalTurn, bool wantLog)
         {
-            var bestAction = BestActionAllowed(CurrentPlayerId, DoctorRoomId, PlayerRoomIds, false);
+            if(wantLog)
+            {
+                PrevState = Copy();
+            }
+
+            TurnId++;
+
+            var bestAction = BestActionAllowed(false);
 
             // move phase ======================================================
 
             // stranger moves if and only if it can not attack the doctor
-            var newCurrentPlayerRoomId = bestAction == PlayerAction.Attack
+            var newRoomId = bestAction == PlayerAction.Attack
                 ? PlayerRoomIds[CurrentPlayerId]
                 : Common.Board.NextRoomId(PlayerRoomIds[CurrentPlayerId], -1);
-            var newPlayerRoomIds = PlayerRoomIds.WithVal(CurrentPlayerId, newCurrentPlayerRoomId);
+            PlayerRoomIds[CurrentPlayerId] = newRoomId;
 
             // check for attack again after move
             if(bestAction != PlayerAction.Attack)
             {
-                bestAction = BestActionAllowed(CurrentPlayerId, DoctorRoomId, newPlayerRoomIds, false);
+                bestAction = BestActionAllowed(false);
             }
 
             // action phase ====================================================
 
-            var newPlayerMoveCards = PlayerMoveCards;
-            var newPlayerWeapons = PlayerWeapons;
-            var newPlayerFailures = PlayerFailures;
-            var newPlayerStrengths = PlayerStrengths;
-            var newAttackerHist = AttackerHist;
-            var newWinner = RuleHelper.InvalidPlayerId;
-
             if(bestAction == PlayerAction.Attack)
             {
-                if(ProcessAttack(
-                    ref newPlayerMoveCards,
-                    ref newPlayerWeapons,
-                    ref newPlayerFailures,
-                    ref newPlayerStrengths,
-                    ref newAttackerHist))
+                if(ProcessAttack())
                 {
-                    newWinner = RuleHelper.ToNormalPlayerId(CurrentPlayerId);
+                    Winner = RuleHelper.ToNormalPlayerId(CurrentPlayerId);
                 }
-
             }
 
             // doctor phase ====================================================
-            DoDoctorPhase(
-                newPlayerRoomIds,
-                out var newPlayersHadTurn,
-                out var newCurrentPlayerId,
-                out var newDoctorRoomId);
+            if(!HasWinner)
+            {
+                DoDoctorPhase();
+            }
 
             // wrap-up phase ===================================================
-            var newState = new ImmutableGameState(
-                    Common:           Common,
-                    TurnId:           TurnId + 1,
-                    CurrentPlayerId:  newCurrentPlayerId,
-                    DoctorRoomId:     newDoctorRoomId,
-                    PlayerRoomIds:    newPlayerRoomIds,
-                    PlayersHadTurn:   newPlayersHadTurn,
-                    PlayerMoveCards:  newPlayerMoveCards,
-                    PlayerWeapons:    newPlayerWeapons,
-                    PlayerFailures:   newPlayerFailures,
-                    PlayerStrengths:  newPlayerStrengths,
-                    AttackerHist:     newAttackerHist,
-                    Winner:           newWinner,
-                    PrevTurn:         normalTurn,
-                    PrevState:        this);
-
             if(wantLog)
             {
-                Console.WriteLine(newState.PrevTurnSummary(true));
+                Console.WriteLine(PrevTurnSummary(true));
             }
 
-            if(!newState.HasWinner && !newState.IsNormalTurn)
+            if(!HasWinner && !IsNormalTurn)
             {
                 // could avoid newState allocation and pass underlying variables directly
-                return newState.AfterStrangerTurn(normalTurn, wantLog);
+                return AfterStrangerTurn(normalTurn, wantLog);
             }
 
-            return newState;
+            return this;
         }
 
         // returns whether attack was successful and thus attacker is winner
-        protected bool ProcessAttack(
-            ref ImmutableArray<double> playerMoveCards,
-            ref ImmutableArray<double> playerWeapons,
-            ref ImmutableArray<double> playerFailures,
-            ref ImmutableArray<int> playerStrengths,
-            ref ImmutableArray<int> attackerHist)
+        protected bool ProcessAttack()
         {
-            var attackStrength = (double)playerStrengths[CurrentPlayerId];
+            var attackStrength = (double)PlayerStrengths[CurrentPlayerId];
 
-            playerStrengths = playerStrengths.IncrementVal(CurrentPlayerId, 1);
-            attackerHist = attackerHist.Add(CurrentPlayerId);
+            PlayerStrengths[CurrentPlayerId]++;
+            AttackerHist.Add(CurrentPlayerId);
 
             if(Common.HasStrangers)
             {
@@ -460,15 +413,15 @@ namespace Kdl.Core
                 // if normal player is attacking and attack actually requires normal players to defend
                 if(IsNormalTurn)
                 {
-                    useWeapon(ref attackStrength, ref playerWeapons);
+                    useWeapon(ref attackStrength);
                 }
 
                 // player id of normal defender
                 var defender = RuleHelper.OpposingNormalPlayer(CurrentPlayerId);
 
-                defendWithCardType(defender, ref attackStrength, ref playerFailures, RuleHelper.Simple.CloversPerFailure);
-                defendWithCardType(defender, ref attackStrength, ref playerWeapons, RuleHelper.Simple.CloversPerWeapon);
-                defendWithCardType(defender, ref attackStrength, ref playerMoveCards, RuleHelper.Simple.CloversPerMoveCard);
+                defendWithCardType(defender, ref attackStrength, PlayerFailures, RuleHelper.Simple.CloversPerFailure);
+                defendWithCardType(defender, ref attackStrength, PlayerWeapons, RuleHelper.Simple.CloversPerWeapon);
+                defendWithCardType(defender, ref attackStrength, PlayerMoveCards, RuleHelper.Simple.CloversPerMoveCard);
 
                 return attackStrength > 0;
             }
@@ -478,7 +431,7 @@ namespace Kdl.Core
 
                 if(numDefensiveClovers <= 2 * attackStrength)
                 {
-                    useWeapon(ref attackStrength, ref playerWeapons);
+                    useWeapon(ref attackStrength);
                 }
 
                 if(numDefensiveClovers < attackStrength)
@@ -497,77 +450,70 @@ namespace Kdl.Core
                         return true;
                     }
 
-                    defendWithCardType(defender, ref attackStrength, ref playerFailures, RuleHelper.Simple.CloversPerFailure);
-                    defendWithCardType(defender, ref attackStrength, ref playerWeapons, RuleHelper.Simple.CloversPerWeapon);
-                    defendWithCardType(defender, ref attackStrength, ref playerMoveCards, RuleHelper.Simple.CloversPerMoveCard);
+                    defendWithCardType(defender, ref attackStrength, PlayerFailures, RuleHelper.Simple.CloversPerFailure);
+                    defendWithCardType(defender, ref attackStrength, PlayerWeapons, RuleHelper.Simple.CloversPerWeapon);
+                    defendWithCardType(defender, ref attackStrength, PlayerMoveCards, RuleHelper.Simple.CloversPerMoveCard);
                 }
 
                 return false;
             }
 
-            void useWeapon(ref double attackStrength, ref ImmutableArray<double> playerWeapons)
+            void useWeapon(ref double attackStrength)
             {
-                if(playerWeapons[CurrentPlayerId] >= 1)
+                if(PlayerWeapons[CurrentPlayerId] >= 1)
                 {
                     attackStrength += RuleHelper.Simple.StrengthPerWeapon;
-                    playerWeapons = playerWeapons.IncrementVal(CurrentPlayerId, -1);
+                    PlayerWeapons[CurrentPlayerId]--;
                 }
             }
 
             void defendWithCardType(
                 int defender,
                 ref double attackStrength,
-                ref ImmutableArray<double> playerCards,
+                double[] playerCards,
                 double cloversPerCard)
             {
                 if(attackStrength > 0 && playerCards[defender] > 0)
                 {
                     var numUsedCards = Math.Min(playerCards[defender], attackStrength / cloversPerCard);
-                    playerCards = playerCards.IncrementVal(defender, -numUsedCards);
+                    playerCards[defender] -= numUsedCards;
                     attackStrength -= numUsedCards * cloversPerCard;
                 }
             }
         }
 
-        protected void DoDoctorPhase(
-            IList<int> playerRoomIds,
-            out ImmutableArray<bool> newPlayersHadTurn,
-            out int newCurrentPlayerId,
-            out int newDoctorRoomId)
+        protected void DoDoctorPhase()
         {
-            newPlayersHadTurn = PlayersHadTurn.WithVal(CurrentPlayerId, true);
-            newDoctorRoomId = Common.Board.NextRoomId(DoctorRoomId, 1);
+            PlayersHadTurn[CurrentPlayerId] = true;
+            DoctorRoomId = Common.Board.NextRoomId(DoctorRoomId, 1);
 
             // normal next player progression
-            newCurrentPlayerId = (CurrentPlayerId + 1) % Common.NumAllPlayers;
+            var prevPlayerId = CurrentPlayerId;
+            CurrentPlayerId = (CurrentPlayerId + 1) % Common.NumAllPlayers;
 
             // doctor activation may override
-            if (newPlayersHadTurn.All(hadTurn => hadTurn))
+            if (PlayersHadTurn.All(hadTurn => hadTurn))
             {
-                for (int playerOffset = 1; playerOffset <= Common.NumAllPlayers; playerOffset++)
+                for (int playerOffset = 0; playerOffset < Common.NumAllPlayers; playerOffset++)
                 {
                     int playerId = (CurrentPlayerId + playerOffset) % Common.NumAllPlayers;
-                    if (playerRoomIds[playerId] == newDoctorRoomId)
+                    if (PlayerRoomIds[playerId] == DoctorRoomId)
                     {
-                        newCurrentPlayerId = playerId;
+                        CurrentPlayerId = playerId;
                         break;
                     }
                 }
             }
         }
 
-        public PlayerAction BestActionAllowed(
-            int currentPlayerId,
-            int doctorRoomId,
-            IList<int> playerRoomIds,
-            bool movedStrangerThatSawCurrentPlayer)
+        public PlayerAction BestActionAllowed(bool movedStrangerThatSawDoctor)
         {
             var seenByOtherPlayers = false;
-            var currentPlayerRoomId = playerRoomIds[currentPlayerId];
+            var currentPlayerRoomId = PlayerRoomIds[CurrentPlayerId];
 
-            for(int playerId = 0; playerId < playerRoomIds.Count; playerId++)
+            for(int playerId = 0; playerId < PlayerRoomIds.Length; playerId++)
             {
-                if(playerId != currentPlayerId && Common.Board.Sight[currentPlayerRoomId, playerRoomIds[playerId]])
+                if(playerId != CurrentPlayerId && Common.Board.Sight[currentPlayerRoomId, PlayerRoomIds[playerId]])
                 {
                     seenByOtherPlayers = true;
                     break;
@@ -579,12 +525,12 @@ namespace Kdl.Core
                 return PlayerAction.None;
             }
 
-            if(currentPlayerRoomId == DoctorRoomId && !movedStrangerThatSawCurrentPlayer)
+            if(currentPlayerRoomId == DoctorRoomId && !movedStrangerThatSawDoctor)
             {
                 return PlayerAction.Attack;
             }
 
-            return Common.Board.Sight[currentPlayerRoomId, doctorRoomId]
+            return Common.Board.Sight[currentPlayerRoomId, DoctorRoomId]
                 ? PlayerAction.None
                 : PlayerAction.Loot;
         }
@@ -592,7 +538,7 @@ namespace Kdl.Core
         public string NormalTurnHist()
         {
             var sb = new StringBuilder();
-            var states = new List<ImmutableGameState>();
+            var states = new List<MutableGameState>();
             var stateForTraversal = this;
 
             while(stateForTraversal != null)
@@ -621,6 +567,11 @@ namespace Kdl.Core
 
         protected string PrevTurnSummary(bool verbose = false)
         {
+            if(PrevState == null)
+            {
+                return "PrevStateNull";
+            }
+
             // non-verbose summary: (P1MA)1@24(21)
 
             var prevPlayer = PrevState.CurrentPlayerId;
@@ -653,7 +604,7 @@ namespace Kdl.Core
 
             var action = PlayerAction.None;
 
-            if(PrevState.AttackerHist.Length != AttackerHist.Length)
+            if(PrevState.AttackerHist.Count != AttackerHist.Count)
             {
                 action = PlayerAction.Attack;
             }

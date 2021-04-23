@@ -12,8 +12,15 @@ namespace Kdl.Core
         where TTurn : ITurn
         where TGameState : IGameState<TTurn,TGameState>
     {
+        public class Options
+        {
+            public bool PlayoutIsUniform { get; set; } = true;
+            public bool ExpansionIsEager { get; set; } = true;
+        }
+
         protected Node _root;
         protected Random _random;
+        public Options Settings { get; set; } = new Options();
 
         public McTreeSearch(TGameState gameState, Random random = null)
         {
@@ -26,7 +33,7 @@ namespace Kdl.Core
 
         public IEnumerable<Node> GetTopTurns(CancellationToken token)
         {
-            _root.BuildTree(token, true, _random);
+            _root.BuildTree(token, Settings, _random);
             //_root.BuildTreeParallel(token);
             IsTreeValid();
             return _root.Children
@@ -80,35 +87,17 @@ namespace Kdl.Core
 
         public bool Reroot(TGameState goalState)
         {
-            var stateHist = new List<TGameState>();
-            var state = goalState;
+            var foundNode = _root.FindNode(goalState);
 
-            while (state != null)
+            if(foundNode == null)
             {
-                stateHist.Add(state);
-                state = state.PrevState;
+                _root = new Node(null, goalState);
+                return false;
             }
 
-            stateHist.Reverse();
-
-            foreach(var fwdState in stateHist)
-            {
-                var matchingChild = _root.Children.Where(child => child.GameState.Equals(fwdState)).FirstOrDefault();
-
-                if(matchingChild != default)
-                {
-                    _root = matchingChild;
-                }
-            }
-
-            if(_root.GameState.Equals(goalState))
-            {
-                _root.ForgetParent();
-                return true;
-            }
-
-            _root = new Node(null, goalState);
-            return false;
+            _root = foundNode;
+            _root.ForgetParent();
+            return true;
         }
 
         public class Node
@@ -152,12 +141,24 @@ namespace Kdl.Core
 
             public void ForgetParent() => Parent = null;
 
+            public Node FindNode(TGameState state)
+            {
+                if(GameState.Equals(state))
+                {
+                    return this;
+                }
+
+                return Children
+                    .Select(child => child.FindNode(state))
+                    .FirstOrDefault(foundNode => foundNode != null);
+            }
+
             public double HypotheticalSelectionPreferenceValue(TGameState gameState, int decidingPlayerId, int parentNumRuns)
                 => Math.Atan(gameState.HeuristicScore(decidingPlayerId))
                 + 0.5 // pretend half-win
                 + ExplorationCoefficient * Math.Sqrt(Math.Log(parentNumRuns));
 
-            public void BuildTree(CancellationToken token, bool expandAsSoonAsPossible, Random random = null)
+            public void BuildTree(CancellationToken token, Options settings, Random random = null)
             {
                 random ??= new Random();
 
@@ -165,7 +166,7 @@ namespace Kdl.Core
                 {
                     var node = this;
 
-                    if(expandAsSoonAsPossible)
+                    if(settings.ExpansionIsEager)
                     {
                         // phase: select
                         while(!node.UntriedNextStates.Any() && !node.GameState.HasWinner)
@@ -213,7 +214,7 @@ namespace Kdl.Core
                     }
 
                     // phase: simulate
-                    var terminalState = SimulateToEnd(node.GameState, random);
+                    var terminalState = SimulateToEnd(node.GameState, settings, random);
 
                     // phase: back propagate simulation results
                     while(node != null)
@@ -334,13 +335,28 @@ namespace Kdl.Core
                 return child;
             }
 
-            protected static TGameState SimulateToEnd(TGameState gameState, Random random)
+            protected static TGameState SimulateToEnd(TGameState gameState, Options settings, Random random)
             {
-                while (!gameState.HasWinner)
+                if(gameState.IsMutable)
                 {
-                    gameState = gameState.WeightedRandomNextState<TTurn, TGameState>(random);
-                    //var nextStates = gameState.NextStates<TTurn, TGameState>();
-                    //gameState = nextStates[random.Next(nextStates.Count)];
+                    gameState = gameState.Copy();
+                }
+
+                if(settings.PlayoutIsUniform)
+                {
+                    while (!gameState.HasWinner)
+                    {
+                        var turns = gameState.PossibleTurns();
+                        var turn = turns[random.Next(turns.Count)];
+                        gameState = gameState.AfterTurn(turn, false);
+                    }
+                }
+                else
+                {
+                    while (!gameState.HasWinner)
+                    {
+                        gameState = gameState.WeightedRandomNextState<TTurn, TGameState>(random);
+                    }
                 }
 
                 return gameState;

@@ -9,16 +9,15 @@ namespace Kdl.Core
         where TTurn : ITurn
         where TGameState : IGameState<TTurn,TGameState>
     {
+        TGameState Copy();
+        bool IsMutable { get; }
         int CurrentPlayerId { get; }
         bool HasWinner { get; }
         int Winner { get; }
         TTurn PrevTurn { get; }
-        TGameState PrevState { get; }
-
-        TGameState AfterTurn(TTurn turn);
+        TGameState AfterTurn(TTurn turn, bool mustReturnNewObject);
         List<TTurn> PossibleTurns();
         double HeuristicScore(int analysisPlayerId);
-
     }
 
     public static class GameStateExtensions
@@ -28,7 +27,7 @@ namespace Kdl.Core
             where TGameState : IGameState<TTurn,TGameState>
         {
             var turns = gameState.PossibleTurns();
-            var nextStates = turns.Select(turn => gameState.AfterTurn(turn));
+            var nextStates = turns.Select(turn => gameState.AfterTurn(turn, true));
 
             double stateToScore(TGameState state) => state.HeuristicScore(gameState.CurrentPlayerId);
 
@@ -37,7 +36,6 @@ namespace Kdl.Core
                 ? nextStates.OrderBy(stateToScore)
                 : nextStates.OrderByDescending(stateToScore)
                 );
-            var scores = nextStates.Select(state => stateToScore(state)).ToList();
             return nextStates.ToList();
         }
 
@@ -70,7 +68,7 @@ namespace Kdl.Core
                 Math.Log(1 + desiredExponentialWeightSum * (Math.Pow(decayFactor, numStates) - 1))
                 / Math.Log(decayFactor)
                 );
-            return newStates.Skip(stateIdx).First();
+            return newStates[stateIdx];
         }
 
     }

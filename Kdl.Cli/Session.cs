@@ -30,11 +30,11 @@ namespace Kdl.Cli
         List<string> ClosedWingNamesOld { get; set; }
         RuleFlags Rules { get; set; } = RuleFlags.SuperSimple;
         CommonGameState GameCommon { get; set; }
-        ImmutableGameState Game { get; set; }
+        MutableGameState Game { get; set; }
         bool ShouldQuit { get; set; }
         double AnalysisLevel { get; set; } = 1;
         SimpleTurn RecentAnalyzedTurn { get; set; }
-        McTreeSearch<SimpleTurn,ImmutableGameState> Mcts { get; set; }
+        McTreeSearch<SimpleTurn,MutableGameState> Mcts { get; set; }
 
         string BoardPath => JsonFilePath(BoardName);
         string DeckPath => JsonFilePath(DeckName);
@@ -210,7 +210,7 @@ namespace Kdl.Cli
                 }
                 else
                 {
-                    var startingAnalysisLevel = directiveTag == TagAnalyzeAscending ? 0 : AnalysisLevel;
+                    var startingAnalysisLevel = directiveTag == TagAnalyzeAscending ? 1 : AnalysisLevel;
 
                     for(var level = (int)startingAnalysisLevel; level <= AnalysisLevel; level++)
                     {
@@ -358,7 +358,7 @@ namespace Kdl.Cli
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var appraisedTurn = RunCancellableFunc(
                 //() => Game.Appraise(analysisLevel, cancelSource.Token, out numStatesVisited),
-                () => TreeSearch<SimpleTurn,ImmutableGameState>.FindBestTurn(
+                () => TreeSearch<SimpleTurn,MutableGameState>.FindBestTurn(
                     Game,
                     analysisLevel,
                     cancelSource.Token,
@@ -397,7 +397,7 @@ namespace Kdl.Cli
 
             if(Mcts == null)
             {
-                Mcts = new McTreeSearch<SimpleTurn,ImmutableGameState>(Game, new Random(1));
+                Mcts = new McTreeSearch<SimpleTurn,MutableGameState>(Game, new Random(1));
             }
             else
             {
@@ -476,7 +476,7 @@ namespace Kdl.Cli
 
             if (Game.CheckNormalTurn(turn, out var errorMsg))
             {
-                Game = Game.AfterNormalTurn(turn, true);
+                Game = Game.Copy().AfterNormalTurn(turn, true);
             }
             else
             {
@@ -500,7 +500,7 @@ namespace Kdl.Cli
                     board,
                     NumNormalPlayers);
 
-                Game = ImmutableGameState.AtStart(GameCommon);
+                Game = MutableGameState.AtStart(GameCommon);
 
                 BoardNameOld = BoardName;
                 DeckNameOld = DeckName;

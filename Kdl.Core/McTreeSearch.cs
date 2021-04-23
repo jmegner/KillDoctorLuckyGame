@@ -8,14 +8,14 @@ using Util;
 
 namespace Kdl.Core
 {
-    public class Mcts<TTurn,TGameState>
+    public class McTreeSearch<TTurn,TGameState>
         where TTurn : ITurn
         where TGameState : IGameState<TTurn,TGameState>
     {
         protected Node _root;
         protected Random _random;
 
-        public Mcts(TGameState gameState, Random random = null)
+        public McTreeSearch(TGameState gameState, Random random = null)
         {
             _random = random ?? new Random();
             _root = new Node(null, gameState);

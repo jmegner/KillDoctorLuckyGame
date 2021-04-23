@@ -34,7 +34,7 @@ namespace Kdl.Cli
         bool ShouldQuit { get; set; }
         double AnalysisLevel { get; set; } = 1;
         SimpleTurn RecentAnalyzedTurn { get; set; }
-        Mcts<SimpleTurn,ImmutableGameState> Mcts { get; set; }
+        McTreeSearch<SimpleTurn,ImmutableGameState> Mcts { get; set; }
 
         string BoardPath => JsonFilePath(BoardName);
         string DeckPath => JsonFilePath(DeckName);
@@ -356,23 +356,29 @@ namespace Kdl.Cli
             int numStatesVisited = -1;
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var appraisedMove = RunCancellableFunc(
-                () => Game.Appraise(analysisLevel, cancelSource.Token, out numStatesVisited),
+            var appraisedTurn = RunCancellableFunc(
+                //() => Game.Appraise(analysisLevel, cancelSource.Token, out numStatesVisited),
+                () => TreeSearch<SimpleTurn,ImmutableGameState>.FindBestTurn(
+                    Game,
+                    analysisLevel,
+                    cancelSource.Token,
+                    out numStatesVisited,
+                    0.5),
                 cancelSource,
                 false);
             watch.Stop();
 
-            RecentAnalyzedTurn = new SimpleTurn(appraisedMove.Move);
+            RecentAnalyzedTurn = new SimpleTurn(appraisedTurn.Turn);
 
-            var scoreText = appraisedMove.Appraisal switch
+            var scoreText = appraisedTurn.Appraisal switch
             {
                 double.MaxValue => "WIN",
                 double.MinValue => "LOSE",
-                _ => appraisedMove.Appraisal.ToString("F4"),
+                _ => appraisedTurn.Appraisal.ToString("F4"),
             };
 
             Console.WriteLine(
-                "bestMove=" + appraisedMove.Move
+                "bestTurn=" + appraisedTurn.Turn
                 + " level=" + analysisLevel
                 + " appraisal=" + scoreText
                 + " states=" + numStatesVisited.ToString("N0")
@@ -381,7 +387,7 @@ namespace Kdl.Cli
 
             if(doSuggestedMove && !cancelSource.IsCancellationRequested)
             {
-                DoMoves(new SimpleTurn(appraisedMove.Move));
+                DoMoves(appraisedTurn.Turn);
             }
         }
 
@@ -391,7 +397,7 @@ namespace Kdl.Cli
 
             if(Mcts == null)
             {
-                Mcts = new Mcts<SimpleTurn,ImmutableGameState>(Game, new Random(1));
+                Mcts = new McTreeSearch<SimpleTurn,ImmutableGameState>(Game, new Random(1));
             }
             else
             {

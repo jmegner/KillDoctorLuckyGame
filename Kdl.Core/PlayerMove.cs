@@ -27,23 +27,25 @@ namespace Kdl.Core
             => (PlayerId + 1) + "@" + DestRoomId;
     }
 
-    public struct AppraisedPlayerMove
+    public struct AppraisedPlayerTurn<TTurn,TGameState>
+        where TTurn : ITurn
+        where TGameState : IGameState<TTurn,TGameState>
     {
         public double Appraisal { get; set; }
-        public PlayerMove Move;
-        public ImmutableGameState EndingState { get; set; }
+        public TTurn Turn;
+        public TGameState EndingState { get; set; }
 
-        public AppraisedPlayerMove(
+        public AppraisedPlayerTurn(
             double appraisal,
-            PlayerMove move,
-            ImmutableGameState state)
+            TTurn turn,
+            TGameState state)
         {
             Appraisal = appraisal;
-            Move = move;
+            Turn = turn;
             EndingState = state;
         }
 
-        public override string ToString() => Move + "^" + Appraisal;
+        public override string ToString() => Turn + "^" + Appraisal;
     }
 
     public static class PlayerMoveExtensions

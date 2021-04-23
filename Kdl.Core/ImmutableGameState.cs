@@ -88,7 +88,7 @@ namespace Kdl.Core
                 PlayerStrengths:  playerVals(RuleHelper.PlayerStartingStrength),
                 AttackerHist:     ImmutableArray<int>.Empty,
                 Winner:           RuleHelper.InvalidPlayerId,
-                PrevTurn:         null,
+                PrevTurn:         new SimpleTurn(0, 0),
                 PrevState:        null);
             return game;
         }
@@ -865,74 +865,6 @@ namespace Kdl.Core
                 - Math.Pow(decayFactorNormal, normalEnemyDoctorDist)
                 - Math.Pow(decayFactorStranger, strangerEnemyDoctorDist);
             return score;
-        }
-
-        public AppraisedPlayerMove Appraise(int analysisLevel, CancellationToken cancellationToken, out int numStatesVisited)
-        {
-            numStatesVisited = 0;
-            return Appraise(CurrentPlayerId, analysisLevel, cancellationToken, ref numStatesVisited);
-        }
-
-        // reminder: analysisPlayerId will never be a stranger
-        public AppraisedPlayerMove Appraise(
-            int analysisPlayerId,
-            int analysisLevel,
-            CancellationToken cancellationToken,
-            ref int numStates)
-        {
-            numStates++;
-
-            if(HasWinner || analysisLevel == 0)
-            {
-                return new AppraisedPlayerMove(HeuristicScore(analysisPlayerId), default, this);
-            }
-
-            var appraisalIsForCurrentPlayer = analysisPlayerId == CurrentPlayerId;
-            var currentPlayerMoveAbility = PlayerMoveCards[CurrentPlayerId] + 1;
-
-            var bestMove = new AppraisedPlayerMove(double.MinValue, default, default);
-
-            var movablePlayerIds = Common.NumNormalPlayers == RuleHelper.NumNormalPlayersWhenHaveStrangers
-                ? new[] { CurrentPlayerId, RuleHelper.StrangerPlayerIdFirst, RuleHelper.StrangerPlayerIdSecond, }
-                : new[] { CurrentPlayerId, };
-
-            // player just moves themself OR a stranger
-            foreach (var movablePlayer in movablePlayerIds)
-            {
-                var movablePlayerRoom = PlayerRoomIds[movablePlayer];
-
-                foreach (var destRoom in Common.Board.RoomIds)
-                {
-                    if (Common.Board.Distance[movablePlayerRoom, destRoom] <= currentPlayerMoveAbility)
-                    {
-                        var move = new PlayerMove(movablePlayer, destRoom);
-                        var hypoState = AfterNormalTurn(new SimpleTurn(move));
-                        var hypoAppraisedMove = hypoState.Appraise(
-                            CurrentPlayerId,
-                            analysisLevel - 1,
-                            cancellationToken,
-                            ref numStates);
-
-                        if(CurrentPlayerId != hypoState.CurrentPlayerId)
-                        {
-                            hypoAppraisedMove.Appraisal = hypoAppraisedMove.EndingState.HeuristicScore(CurrentPlayerId);
-                        }
-
-                        if (bestMove.Appraisal < hypoAppraisedMove.Appraisal)
-                        {
-                            bestMove = hypoAppraisedMove;
-                            bestMove.Move = move;
-                        }
-
-                        if(cancellationToken.IsCancellationRequested)
-                        {
-                            return bestMove;
-                        }
-                    }
-                }
-            }
-
-            return bestMove;
         }
 
         public List<SimpleTurn> PossibleTurns()

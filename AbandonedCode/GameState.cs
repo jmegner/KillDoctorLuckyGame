@@ -77,7 +77,7 @@ namespace Kdl.Core
         public string Summary(string leadingText = "")
         {
             var sb = new StringBuilder();
-            sb.Append($"{leadingText}Turn {TurnId}, {CurrentPlayer}, P1Score={Hist.Score(0, NumNormalPlayers)}");
+            sb.Append($"{leadingText}Turn {TurnId}, {CurrentPlayer}");
             sb.Append($"\n{leadingText}  AttackHist={{{string.Join(',', Hist.Attackers.Select(pid => pid + 1))}}}");
             sb.Append($"\n{leadingText}  Doctor@R{DoctorRoomId}");
 

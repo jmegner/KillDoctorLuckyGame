@@ -29,12 +29,6 @@ namespace Kdl.Core
             PlayerStats = new(numPlayers.Times(() => new PlayerStat()));
         }
 
-        public double Score(int myPlayerId, int numNormalPlayers)
-        {
-            return RuleHelper.Simple.Score(myPlayerId, numNormalPlayers, Attackers);
-
-        }
-
         public void RememberAttack(int playerId)
         {
             PlayerStats[playerId].NumAttacks++;

@@ -5,16 +5,17 @@ using System.Runtime.CompilerServices;
 
 namespace Kdl.Core
 {
-    public interface IGameState<TTurn>
+    public interface IGameState<TTurn,TGameState>
         where TTurn : ITurn
+        where TGameState : IGameState<TTurn,TGameState>
     {
         int CurrentPlayerId { get; }
         bool HasWinner { get; }
         int Winner { get; }
         TTurn PrevTurn { get; }
-        IGameState<TTurn> PrevState { get; }
+        TGameState PrevState { get; }
 
-        IGameState<TTurn> AfterTurn(TTurn turn);
+        TGameState AfterTurn(TTurn turn);
         List<TTurn> PossibleTurns();
         double HeuristicScore(int analysisPlayerId);
 
@@ -24,10 +25,10 @@ namespace Kdl.Core
     {
         public static List<TGameState> NextStates<TTurn,TGameState>(this TGameState gameState, bool sortAscending = false)
             where TTurn : ITurn
-            where TGameState : IGameState<TTurn>
+            where TGameState : IGameState<TTurn,TGameState>
         {
             var turns = gameState.PossibleTurns();
-            var nextStates = turns.Select(turn => (TGameState)gameState.AfterTurn(turn));
+            var nextStates = turns.Select(turn => gameState.AfterTurn(turn));
 
             double stateToScore(TGameState state) => state.HeuristicScore(gameState.CurrentPlayerId);
 
@@ -44,7 +45,7 @@ namespace Kdl.Core
             this TGameState gameState,
             Random random)
             where TTurn : ITurn
-            where TGameState : IGameState<TTurn>
+            where TGameState : IGameState<TTurn,TGameState>
         {
             var newStates = gameState.NextStates<TTurn,TGameState>(false);
 
@@ -64,7 +65,7 @@ namespace Kdl.Core
                 + 1));
             */
             var desiredExponentialWeightSum = random.NextDouble();
-            const double decayFactor = 0.9;
+            const double decayFactor = 0.8;
             var stateIdx = (int)(
                 Math.Log(1 + desiredExponentialWeightSum * (Math.Pow(decayFactor, numStates) - 1))
                 / Math.Log(decayFactor)

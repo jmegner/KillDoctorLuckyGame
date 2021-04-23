@@ -32,7 +32,7 @@ namespace Kdl.Cli
         CommonGameState GameCommon { get; set; }
         ImmutableGameState Game { get; set; }
         bool ShouldQuit { get; set; }
-        int AnalysisLevel { get; set; } = (int)1e6;
+        double AnalysisLevel { get; set; } = 1;
         SimpleTurn RecentAnalyzedTurn { get; set; }
         Mcts<SimpleTurn,ImmutableGameState> Mcts { get; set; }
 
@@ -99,13 +99,14 @@ namespace Kdl.Cli
         const string TagQuit = "q";
         const string TagDisplay = "d";
         const string TagReset = "r";
+        const string TagRepeat = "x";
         const string TagHistory = "h";
         const string TagUndo = "u";
         const string TagAnalyze = "a";
         const string TagAnalyzeAscending = "aa";
         const string TagMctsAnalysis = "m";
-        const string TagExecuteAnalysis = "x";
-        const string TagExecutePreviousAnalysis = "xp";
+        const string TagExecuteAnalysis = "e";
+        const string TagExecutePreviousAnalysis = "ep";
         const string TagBoard = "b";
         const string TagBoardLong = "board";
         const string TagPlayers = "p";
@@ -152,6 +153,22 @@ namespace Kdl.Cli
 
                 Console.WriteLine(Game.Summary(1));
             }
+            else if (directiveTag == TagRepeat)
+            {
+                if(tokens.Length > 1 && int.TryParse(tokens[1], out var numRepeats))
+                {
+                    var directiveToRepeat = string.Join(' ', tokens.Skip(2));
+                    Console.WriteLine($"(REPEAT {numRepeats}: {directiveToRepeat})");
+                    foreach(var i in numRepeats.ToRange())
+                    {
+                        InterpretDirective(directiveToRepeat);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"directive {directiveTag} needs repetition count and directive to repeat");
+                }
+            }
             else if (directiveTag == TagHistory)
             {
                 Console.WriteLine(TagPlayers + " " + NumNormalPlayersOld + ";");
@@ -175,7 +192,7 @@ namespace Kdl.Cli
              || directiveTag == TagExecuteAnalysis
              )
             {
-                if (tokens.Length >= 2 && int.TryParse(tokens[1], out var analysisLevel))
+                if (tokens.Length >= 2 && double.TryParse(tokens[1], out var analysisLevel))
                 {
                     AnalysisLevel = analysisLevel;
                 }
@@ -195,7 +212,7 @@ namespace Kdl.Cli
                 {
                     var startingAnalysisLevel = directiveTag == TagAnalyzeAscending ? 0 : AnalysisLevel;
 
-                    for(int level = startingAnalysisLevel; level <= AnalysisLevel; level++)
+                    for(var level = (int)startingAnalysisLevel; level <= AnalysisLevel; level++)
                     {
                         Analyze(doSuggestedMove, level);
                     }
@@ -336,21 +353,30 @@ namespace Kdl.Cli
         protected void Analyze(bool doSuggestedMove, int analysisLevel)
         {
             var cancelSource = new CancellationTokenSource();
+            int numStatesVisited = -1;
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var appraisedMove = RunCancellableFunc(
-                () => Game.Appraise(Game.CurrentPlayerId, analysisLevel, cancelSource.Token),
+                () => Game.Appraise(analysisLevel, cancelSource.Token, out numStatesVisited),
                 cancelSource,
                 false);
             watch.Stop();
 
             RecentAnalyzedTurn = new SimpleTurn(appraisedMove.Move);
 
+            var scoreText = appraisedMove.Appraisal switch
+            {
+                double.MaxValue => "WIN",
+                double.MinValue => "LOSE",
+                _ => appraisedMove.Appraisal.ToString("F4"),
+            };
+
             Console.WriteLine(
                 "bestMove=" + appraisedMove.Move
-                + ", level=" + analysisLevel
-                + ", appraisal=" + appraisedMove.Appraisal.ToString("N4")
-                + ", timeMs=" + watch.ElapsedMilliseconds
+                + " level=" + analysisLevel
+                + " appraisal=" + scoreText
+                + " states=" + numStatesVisited.ToString("N0")
+                + " timeMs=" + watch.ElapsedMilliseconds
                 );
 
             if(doSuggestedMove && !cancelSource.IsCancellationRequested)
@@ -379,11 +405,11 @@ namespace Kdl.Cli
                 false);
             watch.Stop();
 
-            Console.WriteLine($"MCTS: t={watch.Elapsed.TotalSeconds:F1}, n={Mcts.NumNodes}");
+            Console.WriteLine($"  MCTS: t={watch.Elapsed.TotalSeconds:F1}, n={Mcts.NumRuns}, w={Mcts.NumWins/Mcts.NumRuns:F3}");
 
             foreach(var node in topNodes.Take(numTopResults))
             {
-                Console.WriteLine("  " + node);
+                Console.WriteLine("    " + node);
             }
 
             RecentAnalyzedTurn = topNodes.FirstOrDefault()?.TurnTaken;

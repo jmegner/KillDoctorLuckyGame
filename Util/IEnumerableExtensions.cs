@@ -45,5 +45,26 @@ namespace Util
 
             return currentMaxElement;
         }
+
+        public static (TElem, TCriteria) MaxElementAndCriteria<TElem,TCriteria>(
+            this IEnumerable<TElem> source,
+            Func<TElem, TCriteria> selector)
+            where TCriteria : IComparable<TCriteria>
+        {
+            var maxElem = source.First();
+            var maxCriteria = selector(maxElem);
+
+            foreach (var elem in source)
+            {
+                var criteria = selector(elem);
+                if (maxCriteria.CompareTo(criteria) < 0)
+                {
+                    maxCriteria = criteria;
+                    maxElem = elem;
+                }
+            }
+
+            return (maxElem, maxCriteria);
+        }
     }
 }

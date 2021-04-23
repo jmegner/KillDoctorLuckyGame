@@ -70,7 +70,7 @@ namespace Kdl.Core
         int Winner,
         SimpleTurn PrevTurn,
         ImmutableGameState PrevState)
-        : IGameState<SimpleTurn>
+        : IGameState<SimpleTurn,ImmutableGameState>
     {
         public static ImmutableGameState AtStart(CommonGameState common)
         {
@@ -124,21 +124,6 @@ namespace Kdl.Core
             + "]" + (PrevTurn == null ? "" : "," + PrevTurn)
             + "DS=" + DoctorScore().ToString("F3")
             ;
-
-        IGameState<SimpleTurn> IGameState<SimpleTurn>.PrevState => PrevState;
-
-        public double AttackScore(int playerId = 0)
-            => RuleHelper.Simple.Score(
-                playerId,
-                Common.NumNormalPlayers,
-                AttackerHist);
-
-        public double AttackScore(int playerId, out double gainFromAttackingNext)
-            => RuleHelper.Simple.Score(
-                playerId,
-                Common.NumNormalPlayers,
-                AttackerHist,
-                out gainFromAttackingNext);
 
         public bool HasWinner => Winner != RuleHelper.InvalidPlayerId;
         public bool IsNormalTurn => Common.GetPlayerType(CurrentPlayerId) == PlayerType.Normal;
@@ -298,7 +283,7 @@ namespace Kdl.Core
             return true;
         }
 
-        public IGameState<SimpleTurn> AfterTurn(SimpleTurn turn) => AfterNormalTurn(turn);
+        public ImmutableGameState AfterTurn(SimpleTurn turn) => AfterNormalTurn(turn);
 
         public ImmutableGameState AfterNormalTurn(SimpleTurn turn, bool wantLog = false)
         {
@@ -364,11 +349,25 @@ namespace Kdl.Core
             }
 
             // doctor phase ====================================================
-            DoDoctorPhase(
-                newPlayerRoomIdsBuilder,
-                out var newPlayersHadTurn,
-                out var newCurrentPlayerId,
-                out var newDoctorRoomId);
+            ImmutableArray<bool> newPlayersHadTurn;
+            int newCurrentPlayerId;
+            int newDoctorRoomId;
+
+            if(newWinner == RuleHelper.InvalidPlayerId)
+            {
+                DoDoctorPhase(
+                    newPlayerRoomIdsBuilder,
+                    out newPlayersHadTurn,
+                    out newCurrentPlayerId,
+                    out newDoctorRoomId);
+            }
+            else
+            {
+                newPlayersHadTurn = PlayersHadTurn;
+                newCurrentPlayerId = CurrentPlayerId;
+                newDoctorRoomId = DoctorRoomId;
+            }
+
 
             // wrap-up phase ===================================================
             var newState = new ImmutableGameState(
@@ -768,14 +767,14 @@ namespace Kdl.Core
         {
             if(Winner != RuleHelper.InvalidPlayerId)
             {
-                return analysisPlayerId == Common.ToNormalPlayerId(Winner) ? double.MaxValue : double.MinValue;
+                return analysisPlayerId == Common.ToNormalPlayerId(Winner) ? 1e9 : -1e9;
             }
 
             double miscScore(int playerId, int alliedStrength, bool isAlliedTurn, double alliedDoctorAdvantage)
                 => alliedStrength
                 + 0.5 * alliedStrength * 
                     ( PlayerMoveCards[playerId]
-                    + (isAlliedTurn ? 0.9 : 0.0)
+                    + (isAlliedTurn ? 0.95 : 0.0)
                     + alliedDoctorAdvantage * 0.9
                     )
                 + 0.5 * PlayerWeapons[playerId]
@@ -840,7 +839,23 @@ namespace Kdl.Core
             var doctorRooms = Common.Board.RoomIdsInDoctorVisitOrder(nextDoctorRoomId);
             doctorRooms.Insert(0, DoctorRoomId);
 
-            var myDoctorDist = doctorRooms.IndexOf(myRoom, 0);
+            var myStartingSearchIdx = numPlayersNotHadTurn > 0 ? 1 : 0;
+            var myDoctorDist = 999;
+            for(int i = myStartingSearchIdx; i < doctorRooms.Count; i++)
+            {
+                if(doctorRooms[i] == myRoom)
+                {
+                    myDoctorDist = i;
+                    break;
+                }
+                else if(i > 0 && Common.Board.Distance[myRoom, doctorRooms[i]] <= 1)
+                {
+                    myDoctorDist = i;
+                    break;
+                }
+
+            }
+
             var strangerAllyDoctorDist = doctorRooms.IndexOf(strangerAllyRoom, 1);
             var normalEnemyDoctorDist = doctorRooms.IndexOf(normalEnemyRoom, 1);
             var strangerEnemyDoctorDist = doctorRooms.IndexOf(strangerEnemyRoom, 1);
@@ -852,25 +867,30 @@ namespace Kdl.Core
             return score;
         }
 
-        // reminder: analysisPlayerId will never be a stranger
-        public AppraisedPlayerMove Appraise(int analysisPlayerId, int analysisLevel, CancellationToken cancellationToken)
+        public AppraisedPlayerMove Appraise(int analysisLevel, CancellationToken cancellationToken, out int numStatesVisited)
         {
-            if(Winner != RuleHelper.InvalidPlayerId)
-            {
-                return new AppraisedPlayerMove(analysisPlayerId == Common.ToNormalPlayerId(Winner) ? 1000 : -1000);
-            }
+            numStatesVisited = 0;
+            return Appraise(CurrentPlayerId, analysisLevel, cancellationToken, ref numStatesVisited);
+        }
 
-            if(analysisLevel == 0)
+        // reminder: analysisPlayerId will never be a stranger
+        public AppraisedPlayerMove Appraise(
+            int analysisPlayerId,
+            int analysisLevel,
+            CancellationToken cancellationToken,
+            ref int numStates)
+        {
+            numStates++;
+
+            if(HasWinner || analysisLevel == 0)
             {
-                return new AppraisedPlayerMove(HeuristicScore(analysisPlayerId));
+                return new AppraisedPlayerMove(HeuristicScore(analysisPlayerId), default, this);
             }
 
             var appraisalIsForCurrentPlayer = analysisPlayerId == CurrentPlayerId;
             var currentPlayerMoveAbility = PlayerMoveCards[CurrentPlayerId] + 1;
 
-            var extremumAppraisal = appraisalIsForCurrentPlayer ? double.MinValue : double.MaxValue;
-            var bestMove = new AppraisedPlayerMove(
-                appraisalIsForCurrentPlayer ? double.MinValue : double.MaxValue);
+            var bestMove = new AppraisedPlayerMove(double.MinValue, default, default);
 
             var movablePlayerIds = Common.NumNormalPlayers == RuleHelper.NumNormalPlayersWhenHaveStrangers
                 ? new[] { CurrentPlayerId, RuleHelper.StrangerPlayerIdFirst, RuleHelper.StrangerPlayerIdSecond, }
@@ -888,24 +908,20 @@ namespace Kdl.Core
                         var move = new PlayerMove(movablePlayer, destRoom);
                         var hypoState = AfterNormalTurn(new SimpleTurn(move));
                         var hypoAppraisedMove = hypoState.Appraise(
-                            analysisPlayerId,
+                            CurrentPlayerId,
                             analysisLevel - 1,
-                            cancellationToken);
+                            cancellationToken,
+                            ref numStates);
 
-                        //TODO: have current player maximize their own appraisal, but re-appraise for analysisPlayer?
-                        if (appraisalIsForCurrentPlayer)
+                        if(CurrentPlayerId != hypoState.CurrentPlayerId)
                         {
-                            if(bestMove.Appraisal < hypoAppraisedMove.Appraisal)
-                            {
-                                bestMove = new(hypoAppraisedMove.Appraisal, move);
-                            }
+                            hypoAppraisedMove.Appraisal = hypoAppraisedMove.EndingState.HeuristicScore(CurrentPlayerId);
                         }
-                        else
+
+                        if (bestMove.Appraisal < hypoAppraisedMove.Appraisal)
                         {
-                            if(bestMove.Appraisal > hypoAppraisedMove.Appraisal)
-                            {
-                                bestMove = new(hypoAppraisedMove.Appraisal, move);
-                            }
+                            bestMove = hypoAppraisedMove;
+                            bestMove.Move = move;
                         }
 
                         if(cancellationToken.IsCancellationRequested)

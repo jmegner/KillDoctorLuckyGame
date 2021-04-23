@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Kdl.Core
 {
@@ -28,20 +29,18 @@ namespace Kdl.Core
 
     public struct AppraisedPlayerMove
     {
-        public PlayerMove Move { get; set; }
         public double Appraisal { get; set; }
+        public PlayerMove Move;
+        public ImmutableGameState EndingState { get; set; }
 
         public AppraisedPlayerMove(
             double appraisal,
-            PlayerMove move)
+            PlayerMove move,
+            ImmutableGameState state)
         {
-            Move = move;
             Appraisal = appraisal;
-        }
-
-        public AppraisedPlayerMove(double appraisal)
-            : this(appraisal, new PlayerMove(-1, -1))
-        {
+            Move = move;
+            EndingState = state;
         }
 
         public override string ToString() => Move + "^" + Appraisal;

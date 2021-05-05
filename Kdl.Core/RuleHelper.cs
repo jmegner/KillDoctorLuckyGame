@@ -22,7 +22,7 @@ namespace Kdl.Core
             public const double StrengthPerWeapon = 53.0 / 24.0;
             public const double CloversPerWeapon = 1.0;
 
-            public const double PlayerStartingFailures = 2.0;
+            public const double PlayerStartingFailures = 4.0;
             public const double FailuresPerLoot = JustOverOneThird;
             public const double CloversPerFailure = 50.0 / 24.0;
 
@@ -46,6 +46,9 @@ namespace Kdl.Core
         public const int SideBStrangerPlayerId = 1;
         public const int SideBNormalPlayerId = 2;
         public const int SideAStrangerPlayerId = 3;
+
+        public const double HeuristicScoreWin = double.MaxValue;
+        public const double HeuristicScoreLoss = double.MinValue;
 
         public RuleFlags RuleFlags { get; set; }
 

@@ -16,6 +16,8 @@ namespace Kdl.Core
         {
             public bool PlayoutIsUniform { get; set; } = true;
             public bool ExpansionIsEager { get; set; } = true;
+            public int TreeParallelism { get; set; } = 1;
+            //public int PlayoutParallelism { get; set; } = 1; // not worth it
         }
 
         protected Node _root;
@@ -28,14 +30,21 @@ namespace Kdl.Core
             _root = new Node(null, gameState);
         }
 
-        public int NumRuns => _root.Children.Sum(child => child.NumRuns);
+        public long NumRuns => _root.Children.Sum(child => child.NumRuns);
         public double NumWins => _root.Children.Sum(child => child.NumWins);
 
         public IEnumerable<Node> GetTopTurns(CancellationToken token)
         {
-            _root.BuildTree(token, Settings, _random);
-            //_root.BuildTreeParallel(token);
-            IsTreeValid();
+            if (Settings.TreeParallelism == 1)
+            {
+                _root.BuildTree(token, Settings, _random);
+            }
+            else
+            {
+                _root.BuildTreeParallel(token, Settings);
+            }
+
+            //IsTreeValid();
             return _root.Children
                 .OrderByDescending(child => child.ExploitationValue)
                 .OrderByDescending(child => child.NumRuns);
@@ -69,7 +78,7 @@ namespace Kdl.Core
             }
             */
 
-            for(int i = 0; i < node.Children.Count; i++)
+            for(var i = 0; i < node.Children.Count; i++)
             {
                 var child = node.Children[i];
                 childrenIdxs.Add(i);
@@ -87,24 +96,41 @@ namespace Kdl.Core
 
         public bool Reroot(TGameState goalState)
         {
-            var foundNode = _root.FindNode(goalState);
+            var stateHist = new List<TGameState>();
+            var state = goalState;
 
-            if(foundNode == null)
+            while(state != null)
             {
-                _root = new Node(null, goalState);
-                return false;
+                stateHist.Add(state);
+                state = state.PrevState;
             }
 
-            _root = foundNode;
-            _root.ForgetParent();
-            return true;
+            stateHist.Reverse();
+
+            foreach(var fwdState in stateHist)
+            {
+                var matchingChild = _root.Children.Where(child => child.GameState.Equals(fwdState)).FirstOrDefault();
+                if(matchingChild != default)
+                {
+                    _root = matchingChild;
+                }
+            }
+
+            if(_root.GameState.Equals(goalState))
+            {
+                _root.ForgetParent();
+                return true;
+            }
+
+            _root = new Node(null, goalState);
+            return false;
         }
 
         public class Node
         {
             public Node Parent { get; set; }
             public IList<Node> Children { get; init; } = new List<Node>();
-            public int NumRuns { get; set; }
+            public long NumRuns { get; set; }
             public double NumWins { get; set; }
             public TGameState GameState { get; init; }
             public TTurn TurnTaken => GameState.PrevTurn;
@@ -124,7 +150,7 @@ namespace Kdl.Core
                 Parent = parent;
                 GameState = gameState;
                 HeuristicScoreForPrevPlayer = gameState.HeuristicScore(parent?.GameState.CurrentPlayerId ?? 0);
-                UntriedNextStates = gameState.NextStates<TTurn,TGameState>(true);
+                UntriedNextStates = gameState.SortedNextStates<TTurn,TGameState>(true).ToList();
 
                 var winningNextState = UntriedNextStates.FirstOrDefault(state => state.Winner == GameState.CurrentPlayerId);
                 if(winningNextState != null)
@@ -153,7 +179,7 @@ namespace Kdl.Core
                     .FirstOrDefault(foundNode => foundNode != null);
             }
 
-            public double HypotheticalSelectionPreferenceValue(TGameState gameState, int decidingPlayerId, int parentNumRuns)
+            public double HypotheticalSelectionPreferenceValue(TGameState gameState, int decidingPlayerId, long parentNumRuns)
                 => Math.Atan(gameState.HeuristicScore(decidingPlayerId))
                 + 0.5 // pretend half-win
                 + ExplorationCoefficient * Math.Sqrt(Math.Log(parentNumRuns));
@@ -231,18 +257,16 @@ namespace Kdl.Core
                 }
             }
 
-            public void BuildTreeParallel(CancellationToken token)
+            public void BuildTreeParallel(CancellationToken token, Options settings)
             {
-                var tasks = new Task[Environment.ProcessorCount];
-                foreach(var i in Environment.ProcessorCount.ToRange())
-                {
-                    tasks[i] = Task.Run(() => BuildTreeParallelPiece(token));
-                }
-
+                var tasks = settings.TreeParallelism.ToRange()
+                    .Select(i => Task.Run(() => BuildTreeParallelPieceSafeAndSlow(token, settings)))
+                    //.Select(i => Task.Run(() => BuildTreeParallelPieceFastAndInaccurate(token, settings)))
+                    .ToArray();
                 Task.WaitAll(tasks);
             }
 
-            public void BuildTreeParallelPiece(CancellationToken token)
+            public void BuildTreeParallelPieceSafeAndSlow(CancellationToken token, Options settings)
             {
                 var random = new Random();
 
@@ -283,15 +307,10 @@ namespace Kdl.Core
                         Monitor.Enter(node);
                     }
 
-                    var terminalState = node.GameState;
+                    // phase: playout
+                    var terminalState = SimulateToEnd(node.GameState, settings, random);
 
-                    // simulate
-                    while(!terminalState.HasWinner)
-                    {
-                        terminalState = terminalState.WeightedRandomNextState<TTurn, TGameState>(random);
-                    }
-
-                    // back propagate simulation results
+                    // phase: back propagate playout results
                     while(node != null)
                     {
                         if(!parentIsLocked && node.Parent != null)
@@ -310,6 +329,92 @@ namespace Kdl.Core
                         Monitor.Exit(node);
                         node = node.Parent; // already done Monitor.Enter on node.Parent
                         parentIsLocked = false;
+                    }
+                }
+            }
+
+            public void BuildTreeParallelPieceFastAndInaccurate(CancellationToken token, Options settings)
+            {
+                var random = new Random();
+
+                while(!token.IsCancellationRequested)
+                {
+                    var node = this;
+                    bool wantRestart = false;
+
+                    // select descendant
+                    while(!node.GameState.HasWinner)
+                    {
+                        lock(node.UntriedNextStates)
+                        {
+                            if(node.UntriedNextStates.Any())
+                            {
+                                break;
+                            }
+                        }
+
+                        lock(node.Children)
+                        {
+                            if(!node.Children.Any())
+                            {
+                                wantRestart = true;
+                            }
+                            node = node.Children.MaxElementBy(child => child.SelectionPreferenceValue);
+                        }
+                    }
+
+                    if(wantRestart)
+                    {
+                        continue;
+                    }
+
+                    bool didExpand = false;
+
+                    // expand
+                    lock(node.UntriedNextStates)
+                    {
+                        if(node.UntriedNextStates.Any())
+                        {
+                            var lastIdx = node.UntriedNextStates.Count - 1;
+                            var stateToTry = node.UntriedNextStates[lastIdx];
+                            node.UntriedNextStates.RemoveAt(lastIdx);
+
+                            node = new Node(node, stateToTry);
+                            didExpand = true;
+                        }
+                    }
+
+                    // phase: playout
+                    var terminalState = SimulateToEnd(node.GameState, settings, random);
+
+                    if(didExpand)
+                    {
+                        node.NumRuns++;
+
+                        if(terminalState.Winner == node.Parent.GameState.CurrentPlayerId)
+                        {
+                            node.NumWins++;
+                        }
+
+                        lock(node.Parent.Children)
+                        {
+                            node.Parent.Children.Add(node);
+                        }
+
+                        node = node.Parent;
+                    }
+
+                    // phase: back propagate playout results
+                    while(node != null)
+                    {
+                        node.NumRuns++;
+
+                        if(terminalState.Winner == node.Parent?.GameState.CurrentPlayerId)
+                        {
+                            node.NumWins++;
+                        }
+
+                        node = node.Parent;
                     }
                 }
             }
@@ -335,9 +440,11 @@ namespace Kdl.Core
                 return child;
             }
 
-            protected static TGameState SimulateToEnd(TGameState gameState, Options settings, Random random)
+            protected static TGameState SimulateToEnd(TGameState gameState, Options settings, Random random = null)
             {
-                if(gameState.IsMutable)
+                random ??= new Random();
+
+                if(gameState.IsMutable && !gameState.HasWinner)
                 {
                     gameState = gameState.Copy();
                 }

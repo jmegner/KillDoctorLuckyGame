@@ -187,10 +187,9 @@ namespace Kdl.Cli
                 }
             }
             else if (directiveTag == TagAnalyze
-             || directiveTag == TagAnalyzeAscending
-             || directiveTag == TagMctsAnalysis
-             || directiveTag == TagExecuteAnalysis
-             )
+                || directiveTag == TagAnalyzeAscending
+                || directiveTag == TagMctsAnalysis
+                || directiveTag == TagExecuteAnalysis)
             {
                 if (tokens.Length >= 2 && double.TryParse(tokens[1], out var analysisLevel))
                 {
@@ -199,7 +198,7 @@ namespace Kdl.Cli
 
                 if (!(tokens.Length >= 3 && int.TryParse(tokens[2], out var numTopResults)))
                 {
-                    numTopResults = 10;
+                    numTopResults = 6;
                 }
 
                 bool doSuggestedMove = directiveTag == TagExecuteAnalysis;
@@ -214,7 +213,8 @@ namespace Kdl.Cli
 
                     for(var level = (int)startingAnalysisLevel; level <= AnalysisLevel; level++)
                     {
-                        Analyze(doSuggestedMove, level);
+                        Analyze(doSuggestedMove, level, 1);
+                        //Analyze(doSuggestedMove, level, Environment.ProcessorCount);
                     }
                 }
             }
@@ -350,39 +350,41 @@ namespace Kdl.Cli
             return calcTask.Result;
         }
 
-        protected void Analyze(bool doSuggestedMove, int analysisLevel)
+        protected void Analyze(bool doSuggestedMove, int analysisLevel, int parallelization)
         {
             var cancelSource = new CancellationTokenSource();
             int numStatesVisited = -1;
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var appraisedTurn = RunCancellableFunc(
-                //() => Game.Appraise(analysisLevel, cancelSource.Token, out numStatesVisited),
                 () => TreeSearch<SimpleTurn,MutableGameState>.FindBestTurn(
                     Game,
                     analysisLevel,
                     cancelSource.Token,
                     out numStatesVisited,
-                    0.5),
+                    parallelization),
                 cancelSource,
                 false);
             watch.Stop();
 
-            RecentAnalyzedTurn = new SimpleTurn(appraisedTurn.Turn);
+            if(appraisedTurn.Turn != null)
+            {
+                RecentAnalyzedTurn = new SimpleTurn(appraisedTurn.Turn);
+            }
 
             var scoreText = appraisedTurn.Appraisal switch
             {
-                double.MaxValue => "WIN",
-                double.MinValue => "LOSE",
-                _ => appraisedTurn.Appraisal.ToString("F4"),
+                RuleHelper.HeuristicScoreWin => "WIN",
+                RuleHelper.HeuristicScoreLoss => "LOSE",
+                _ => appraisedTurn.Appraisal.ToString("+0.0000;-0.0000"),
             };
 
             Console.WriteLine(
-                "bestTurn=" + appraisedTurn.Turn
+                $"bestTurn={appraisedTurn.Turn,-10}"
                 + " level=" + analysisLevel
                 + " appraisal=" + scoreText
                 + " states=" + numStatesVisited.ToString("N0")
-                + " timeMs=" + watch.ElapsedMilliseconds
+                + " timeSec=" + (watch.ElapsedMilliseconds / 1000.0).ToString("F2")
                 );
 
             if(doSuggestedMove && !cancelSource.IsCancellationRequested)
@@ -397,7 +399,8 @@ namespace Kdl.Cli
 
             if(Mcts == null)
             {
-                Mcts = new McTreeSearch<SimpleTurn,MutableGameState>(Game, new Random(1));
+                Mcts = new McTreeSearch<SimpleTurn, MutableGameState>(Game, new Random(1));
+                Mcts.Settings.TreeParallelism = 3;
             }
             else
             {

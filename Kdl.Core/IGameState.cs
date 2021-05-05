@@ -12,9 +12,11 @@ namespace Kdl.Core
         TGameState Copy();
         bool IsMutable { get; }
         int CurrentPlayerId { get; }
+        int NumPlayers { get; }
         bool HasWinner { get; }
         int Winner { get; }
         TTurn PrevTurn { get; }
+        TGameState PrevState { get; }
         TGameState AfterTurn(TTurn turn, bool mustReturnNewObject);
         List<TTurn> PossibleTurns();
         double HeuristicScore(int analysisPlayerId);
@@ -22,7 +24,9 @@ namespace Kdl.Core
 
     public static class GameStateExtensions
     {
-        public static List<TGameState> NextStates<TTurn,TGameState>(this TGameState gameState, bool sortAscending = false)
+        public static IEnumerable<TGameState> SortedNextStates<TTurn,TGameState>(
+            this TGameState gameState,
+            bool sortAscending = false)
             where TTurn : ITurn
             where TGameState : IGameState<TTurn,TGameState>
         {
@@ -32,11 +36,10 @@ namespace Kdl.Core
             double stateToScore(TGameState state) => state.HeuristicScore(gameState.CurrentPlayerId);
 
             nextStates
-                = (sortAscending
+                = sortAscending
                 ? nextStates.OrderBy(stateToScore)
-                : nextStates.OrderByDescending(stateToScore)
-                );
-            return nextStates.ToList();
+                : nextStates.OrderByDescending(stateToScore);
+            return nextStates;
         }
 
         public static TGameState WeightedRandomNextState<TTurn,TGameState>(
@@ -45,7 +48,7 @@ namespace Kdl.Core
             where TTurn : ITurn
             where TGameState : IGameState<TTurn,TGameState>
         {
-            var newStates = gameState.NextStates<TTurn,TGameState>(false);
+            var newStates = gameState.SortedNextStates<TTurn, TGameState>(false).ToArray();
 
             var winningNewState = newStates.FirstOrDefault(state => state.Winner == gameState.CurrentPlayerId);
             if(winningNewState != null)

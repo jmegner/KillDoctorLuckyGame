@@ -66,5 +66,15 @@ namespace Util
 
             return (maxElem, maxCriteria);
         }
+
+        public static IEnumerable<T> TakeRatio<T>(this IEnumerable<T> source, double ratio, int minimumCount = 1)
+        {
+            if(ratio >= 1.0 || source.Count() < minimumCount)
+            {
+                return source;
+            }
+
+            return source.Take(1 + (int)(ratio * source.Count()));
+        }
     }
 }

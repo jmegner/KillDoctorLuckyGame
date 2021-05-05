@@ -45,7 +45,22 @@ namespace Kdl.Core
             EndingState = state;
         }
 
-        public override string ToString() => Turn + "^" + Appraisal;
+        public AppraisedPlayerTurn(
+            int analysisPlayerId,
+            TGameState state)
+        {
+            Appraisal = state.HeuristicScore(analysisPlayerId);
+            Turn = state.PrevTurn;
+            EndingState = state;
+        }
+
+        public static AppraisedPlayerTurn<TTurn,TGameState> EmptyMinimum
+            = new AppraisedPlayerTurn<TTurn,TGameState>(double.NegativeInfinity, default, default);
+
+        public static AppraisedPlayerTurn<TTurn,TGameState> EmptyMaximum
+            = new AppraisedPlayerTurn<TTurn,TGameState>(double.PositiveInfinity, default, default);
+
+        public override string ToString() => "" + Turn + Appraisal;
     }
 
     public static class PlayerMoveExtensions

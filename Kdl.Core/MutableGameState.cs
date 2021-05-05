@@ -17,7 +17,6 @@ namespace Kdl.Core
         public int CurrentPlayerId { get; set; }
         public int DoctorRoomId { get; set; }
         public int[] PlayerRoomIds { get; set; }
-        public bool[] PlayersHadTurn { get; set; }
         public double[] PlayerMoveCards { get; set; }
         public double[] PlayerWeapons { get; set; }
         public double[] PlayerFailures { get; set; }
@@ -37,7 +36,6 @@ namespace Kdl.Core
                 CurrentPlayerId = 0,
                 DoctorRoomId = common.Board.DoctorStartRoomId,
                 PlayerRoomIds = playerVals(common.Board.PlayerStartRoomId),
-                PlayersHadTurn = playerVals(false),
                 PlayerMoveCards = playerVals(RuleHelper.Simple.PlayerStartingMoveCards),
                 PlayerWeapons = playerVals(RuleHelper.Simple.PlayerStartingWeapons),
                 PlayerFailures = playerVals(RuleHelper.Simple.PlayerStartingFailures),
@@ -59,7 +57,6 @@ namespace Kdl.Core
                 CurrentPlayerId = CurrentPlayerId,
                 DoctorRoomId = DoctorRoomId,
                 PlayerRoomIds = PlayerRoomIds.ToArray(),
-                PlayersHadTurn = PlayersHadTurn.ToArray(),
                 PlayerMoveCards = PlayerMoveCards.ToArray(),
                 PlayerWeapons = PlayerWeapons.ToArray(),
                 PlayerFailures = PlayerFailures.ToArray(),
@@ -80,7 +77,6 @@ namespace Kdl.Core
                 && CurrentPlayerId == other.CurrentPlayerId
                 && DoctorRoomId == other.DoctorRoomId
                 && PlayerRoomIds.SequenceEqual(other.PlayerRoomIds)
-                && PlayersHadTurn.SequenceEqual(other.PlayersHadTurn)
                 && PlayerMoveCards.SequenceEqual(other.PlayerMoveCards)
                 && PlayerWeapons.SequenceEqual(other.PlayerWeapons)
                 && PlayerFailures.SequenceEqual(other.PlayerFailures)
@@ -102,10 +98,11 @@ namespace Kdl.Core
             + ",[" + DoctorRoomId
             + "," + string.Join(',', PlayerRoomIds)
             + "]" + (PrevTurn == null ? "" : "," + PrevTurn)
-            + "DS=" + DoctorScore().ToString("F3")
+            + ",PPHS=" + PrevPlayerHeuristicScore().ToString("F3")
             ;
 
         public bool IsMutable => true;
+        public int NumPlayers => Common.NumNormalPlayers;
         public bool HasWinner => Winner != RuleHelper.InvalidPlayerId;
         public bool IsNormalTurn => Common.GetPlayerType(CurrentPlayerId) == PlayerType.Normal;
 
@@ -275,7 +272,6 @@ namespace Kdl.Core
             }
 
             PrevTurn = turn;
-            TurnId++;
 
             // move phase ======================================================
 
@@ -321,6 +317,7 @@ namespace Kdl.Core
             }
 
             // wrap-up phase ===================================================
+            TurnId++;
 
             if(wantLog)
             {
@@ -342,8 +339,6 @@ namespace Kdl.Core
             {
                 PrevState = Copy();
             }
-
-            TurnId++;
 
             var bestAction = BestActionAllowed(false);
 
@@ -378,6 +373,8 @@ namespace Kdl.Core
             }
 
             // wrap-up phase ===================================================
+            TurnId++;
+
             if(wantLog)
             {
                 Console.WriteLine(PrevTurnSummary(true));
@@ -484,15 +481,14 @@ namespace Kdl.Core
 
         protected void DoDoctorPhase()
         {
-            PlayersHadTurn[CurrentPlayerId] = true;
             DoctorRoomId = Common.Board.NextRoomId(DoctorRoomId, 1);
 
             // normal next player progression
             var prevPlayerId = CurrentPlayerId;
             CurrentPlayerId = (CurrentPlayerId + 1) % Common.NumAllPlayers;
 
-            // doctor activation may override
-            if (PlayersHadTurn.All(hadTurn => hadTurn))
+            // doctor activation may override;
+            if (TurnId >= Common.NumAllPlayers)
             {
                 for (int playerOffset = 0; playerOffset < Common.NumAllPlayers; playerOffset++)
                 {
@@ -671,9 +667,11 @@ namespace Kdl.Core
 
         public double HeuristicScore(int analysisPlayerId)
         {
-            if(Winner != RuleHelper.InvalidPlayerId)
+            if(HasWinner)
             {
-                return analysisPlayerId == Common.ToNormalPlayerId(Winner) ? 1e9 : -1e9;
+                return analysisPlayerId == Common.ToNormalPlayerId(Winner)
+                    ? RuleHelper.HeuristicScoreWin
+                    : RuleHelper.HeuristicScoreLoss;
             }
 
             double miscScore(int playerId, int alliedStrength, bool isAlliedTurn, double alliedDoctorAdvantage)
@@ -697,9 +695,6 @@ namespace Kdl.Core
                 var alliedStrength = PlayerStrengths[analysisPlayerId] + PlayerStrengths[strangerAlly];
                 var opponentStrength = PlayerStrengths[normalOpponent] + PlayerStrengths[strangerOpponent];
                 var isMyTurn = analysisPlayerId == CurrentPlayerId;
-                var numPlayersNotHadTurn = PlayersHadTurn.Count(x => !x);
-                var doctorDeltaForActivation = Math.Max(1, numPlayersNotHadTurn);
-                var nextDoctorRoomId = Common.Board.NextRoomId(DoctorRoomId, doctorDeltaForActivation);
                 var alliedDoctorAdvantage = DoctorScore(
                     PlayerRoomIds[isMyTurn ? analysisPlayerId : normalOpponent],
                     PlayerRoomIds[isMyTurn ? strangerAlly : strangerOpponent],
@@ -738,8 +733,8 @@ namespace Kdl.Core
         {
             const double decayFactorNormal = 0.9;
             const double decayFactorStranger = 0.5;
-            var numPlayersNotHadTurn = PlayersHadTurn.Count(x => !x);
-            var doctorDeltaForActivation = Math.Max(1, numPlayersNotHadTurn);
+            var numPlayersNotHadTurn = Common.NumAllPlayers - TurnId;
+            var doctorDeltaForActivation = Math.Max(1, numPlayersNotHadTurn + 1);
             var nextDoctorRoomId = Common.Board.NextRoomId(DoctorRoomId, doctorDeltaForActivation);
 
             var doctorRooms = Common.Board.RoomIdsInDoctorVisitOrder(nextDoctorRoomId);
@@ -747,6 +742,7 @@ namespace Kdl.Core
 
             var myStartingSearchIdx = numPlayersNotHadTurn > 0 ? 1 : 0;
             var myDoctorDist = 999;
+
             for(int i = myStartingSearchIdx; i < doctorRooms.Count; i++)
             {
                 if(doctorRooms[i] == myRoom)
@@ -794,14 +790,12 @@ namespace Kdl.Core
                 movablePlayerSubsets.Add(new() { alliedStranger, });
                 movablePlayerSubsets.Add(new() { opposingStranger, });
 
-                /*
                 if(PlayerMoveCards[CurrentPlayerId] > 0)
                 {
                     movablePlayerSubsets.Add(new() { CurrentPlayerId, alliedStranger, });
                     movablePlayerSubsets.Add(new() { CurrentPlayerId, opposingStranger, });
                     movablePlayerSubsets.Add(new() { alliedStranger, opposingStranger, });
                 }
-                */
             }
 
             var turns = new List<SimpleTurn>();
@@ -868,6 +862,24 @@ namespace Kdl.Core
             }
 
             return moves;
+        }
+
+        protected int PrevPlayerId()
+        {
+            var state = PrevState;
+
+            while(state != null && !state.IsNormalTurn)
+            {
+                state = PrevState;
+            }
+
+            return state == null ? RuleHelper.InvalidPlayerId : state.CurrentPlayerId;
+        }
+
+        protected double PrevPlayerHeuristicScore()
+        {
+            var prevPlayerId = PrevPlayerId();
+            return prevPlayerId == RuleHelper.InvalidPlayerId ? double.NaN : HeuristicScore(prevPlayerId);
         }
 
     }

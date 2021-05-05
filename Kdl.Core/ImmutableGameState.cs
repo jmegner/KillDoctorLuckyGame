@@ -82,7 +82,7 @@ namespace Kdl.Core
 
         public ImmutableGameState Copy() => this;
         public bool IsMutable => false;
-
+        public int NumPlayers => Common.NumNormalPlayers;
         public bool HasWinner => Winner != RuleHelper.InvalidPlayerId;
         public bool IsNormalTurn => Common.GetPlayerType(CurrentPlayerId) == PlayerType.Normal;
 

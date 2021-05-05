@@ -30,6 +30,7 @@ namespace Kdl.Core
         public bool[,] Sight { get; init; } // double-indexed by roomId
         public int[,] Distance { get; init; } // double-indexed by roomId
         public int[] AdjacencyCount { get; init; } // indexed by roomId
+        public Dictionary<int,HashSet<int>> StrangerLoopRoomIds { get; init; } // indexed by enemy room id then allied stranger room id
         public int PlayerStartRoomId { get; init; }
         public int DoctorStartRoomId { get; init; }
         public int CatStartRoomId { get; init; }
@@ -79,20 +80,75 @@ namespace Kdl.Core
                 }
             }
 
+            Distance = AdjacencyToDistance(Adjacency);
+            StrangerLoopRoomIds = DistanceToStrangerLoopInfo(RoomIds, Distance, Sight);
+        }
 
+        protected static Dictionary<int,HashSet<int>> DistanceToStrangerLoopInfo(IList<int> roomIds, int[,] dist, bool[,] sight)
+        {
+            var enemyRooms = new SortedSet<int>();
+            var allyRooms = new SortedSet<int>();
 
-            Distance = new int[matrixDim, matrixDim];
-            for(int i = 0; i < Distance.Length; i++)
+            foreach(var roomId in roomIds)
             {
-                var r = i / matrixDim;
-                var c = i % matrixDim;
+                var plus1 = NextRoomId(roomId, 1, roomIds);
+                var plus2 = NextRoomId(roomId, 2, roomIds);
+                var plus3 = NextRoomId(roomId, 3, roomIds);
+
+                if(dist[roomId, plus2] <= 1)
+                {
+                    enemyRooms.Add(plus1);
+                }
+
+                if(dist[roomId, plus3] <= 1 && !sight[plus1, plus3])
+                {
+                    allyRooms.Add(plus1);
+                }
+            }
+
+            var info = new Dictionary<int, HashSet<int>>();
+
+            foreach(var enemyRoom in enemyRooms)
+            {
+                var enemyMinus1 = NextRoomId(enemyRoom, -1, roomIds);
+                var enemyMinus2 = NextRoomId(enemyRoom, -2, roomIds);
+                var workingAllyRooms = new HashSet<int>();
+
+                foreach(var allyRoom in allyRooms)
+                {
+                    if(!sight[allyRoom, enemyRoom]
+                        && !sight[allyRoom, enemyMinus1]
+                        && allyRoom != enemyMinus2)
+                    {
+                        workingAllyRooms.Add(allyRoom);
+                    }
+                }
+
+                if(workingAllyRooms.Any())
+                {
+                    info.Add(enemyRoom, workingAllyRooms);
+                }
+            }
+
+            return info;
+        }
+
+        protected static int[,] AdjacencyToDistance(bool[,] adjacency)
+        {
+            var dim = adjacency.GetLength(0);
+            var distance = new int[dim, dim];
+
+            for(int i = 0; i < distance.Length; i++)
+            {
+                var r = i / dim;
+                var c = i % dim;
                 int initialDist;
 
                 if(r == c)
                 {
                     initialDist = 0;
                 }
-                else if(Adjacency[r, c])
+                else if(adjacency[r, c])
                 {
                     initialDist = 1;
                 }
@@ -101,7 +157,7 @@ namespace Kdl.Core
                     initialDist = 999;
                 }
 
-                Distance[r, c] = initialDist;
+                distance[r, c] = initialDist;
             }
 
             var isImprovingDistance = true;
@@ -109,28 +165,30 @@ namespace Kdl.Core
             {
                 isImprovingDistance = false;
 
-                for(int source = 1; source < matrixDim; source++)
+                for(int source = 1; source < dim; source++)
                 {
-                    for(int destination = 1; destination < matrixDim; destination++)
+                    for(int destination = 1; destination < dim; destination++)
                     {
                         if(source == destination)
                         {
                             continue;
                         }
 
-                        for(int intermediate = 1; intermediate < matrixDim; intermediate++)
+                        for(int intermediate = 1; intermediate < dim; intermediate++)
                         {
-                            var distanceViaIntermediate = Distance[source, intermediate] + Distance[intermediate, destination];
+                            var distanceViaIntermediate = distance[source, intermediate] + distance[intermediate, destination];
 
-                            if(distanceViaIntermediate < Distance[source, destination])
+                            if(distanceViaIntermediate < distance[source, destination])
                             {
-                                Distance[source, destination] = distanceViaIntermediate;
+                                distance[source, destination] = distanceViaIntermediate;
                                 isImprovingDistance = true;
                             }
                         }
                     }
                 }
             }
+
+            return distance;
         }
 
         public static Board FromJson(string boardPath, string boardNameSuffix)
@@ -235,11 +293,13 @@ namespace Kdl.Core
         public bool RoomIsSeenBy(int roomOfConcern, IEnumerable<int> roomsWithOtherPeople)
             => roomsWithOtherPeople.Any(roomId => Sight[roomOfConcern, roomId]);
 
-        public int NextRoomId(int roomId, int delta)
+        public int NextRoomId(int roomId, int delta) => NextRoomId(roomId, delta, RoomIds);
+
+        public static int NextRoomId(int roomId, int delta, IList<int> roomIds)
         {
-            var idx = RoomIds.IndexOf(roomId);
-            var nextIdx = (idx + delta).PositiveRemainder(RoomIds.Count());
-            var nextRoomId = RoomIds[nextIdx];
+            var idx = roomIds.IndexOf(roomId);
+            var nextIdx = (idx + delta).PositiveRemainder(roomIds.Count());
+            var nextRoomId = roomIds[nextIdx];
             return nextRoomId;
         }
 

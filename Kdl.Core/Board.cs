@@ -191,12 +191,49 @@ namespace Kdl.Core
             return distance;
         }
 
-        public static Board FromJson(string boardPath, string boardNameSuffix)
+        public static Board FromJsonFile(string boardPath)
         {
-            return FromJson(boardPath, boardNameSuffix, Enumerable.Empty<string>());
+            return FromJsonFile(boardPath, Enumerable.Empty<string>(), "");
         }
 
-        public static Board FromJson(string boardPath, string boardNameSuffix, IEnumerable<string> closedWingNames)
+        public static Board FromJsonFile(string boardPath, IEnumerable<string> closedWingNames, string boardNameSuffix = "")
+        {
+            var boardText = File.ReadAllText(boardPath);
+            var boardSpec = JsonHelper.Deserialize<BoardSpecification>(boardText);
+            ImmutableArray<Room> openRooms;
+
+            if(closedWingNames.Any())
+            {
+                var closedRoomIds = boardSpec.Wings
+                    .Where(wing => closedWingNames.Contains(wing.Name, StringComparer.OrdinalIgnoreCase))
+                    .SelectMany(wing => wing.RoomIds)
+                    .ToImmutableSortedSet();
+                openRooms = boardSpec.Rooms
+                    .Where(room => !closedRoomIds.Contains(room.Id))
+                    .Select(room => room.WithoutClosed(closedRoomIds))
+                    .ToImmutableArray();
+            }
+            else
+            {
+                openRooms = boardSpec.Rooms;
+            }
+
+            var openRoomIdSet = openRooms.Ids().ToHashSet();
+            int chooseFirstOpen(IEnumerable<int> desiredRoomIds)
+                => desiredRoomIds.First(id => openRoomIdSet.Contains(id));
+
+            var board = new Board(
+                name:              boardSpec.Name + boardNameSuffix,
+                rooms:             openRooms,
+                playerStartRoomId: chooseFirstOpen(boardSpec.PlayerStartRoomIds),
+                doctorStartRoomId: chooseFirstOpen(boardSpec.DoctorStartRoomIds),
+                catStartRoomId:    chooseFirstOpen(boardSpec.CatStartRoomIds),
+                dogStartRoomId:    chooseFirstOpen(boardSpec.DogStartRoomIds));
+
+            return board;
+        }
+
+        public static Board FromJsonResource(string boardPath, string boardNameSuffix, IEnumerable<string> closedWingNames)
         {
             var boardText = File.ReadAllText(boardPath);
             var boardSpec = JsonHelper.Deserialize<BoardSpecification>(boardText);

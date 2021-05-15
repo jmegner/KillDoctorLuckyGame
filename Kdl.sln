@@ -9,6 +9,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kdl.Cli", "Kdl.Cli\Kdl.Cli.
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Util", "Util\Util.csproj", "{20B97D22-D03C-4317-9B4B-2F87CD563775}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kdl.BlazorWasm", "Kdl.BlazorWasm\Kdl.BlazorWasm.csproj", "{B12F2D69-88D2-4510-8C8E-DBB78FEC1601}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,10 @@ Global
 		{20B97D22-D03C-4317-9B4B-2F87CD563775}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{20B97D22-D03C-4317-9B4B-2F87CD563775}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{20B97D22-D03C-4317-9B4B-2F87CD563775}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B12F2D69-88D2-4510-8C8E-DBB78FEC1601}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B12F2D69-88D2-4510-8C8E-DBB78FEC1601}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B12F2D69-88D2-4510-8C8E-DBB78FEC1601}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B12F2D69-88D2-4510-8C8E-DBB78FEC1601}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

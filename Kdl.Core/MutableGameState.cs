@@ -98,7 +98,7 @@ namespace Kdl.Core
             + ",[" + DoctorRoomId
             + "," + string.Join(',', PlayerRoomIds)
             + "]" + (PrevTurn == null ? "" : "," + PrevTurn)
-            + ",PPHS=" + PrevPlayerHeuristicScore().ToString("F3")
+            //+ ",PPHS=" + PrevPlayerHeuristicScore().ToString("F3")
             ;
 
         public bool IsMutable => true;
@@ -362,7 +362,8 @@ namespace Kdl.Core
             {
                 if(ProcessAttack())
                 {
-                    Winner = RuleHelper.ToNormalPlayerId(CurrentPlayerId);
+                    CurrentPlayerId = Common.ToNormalPlayerId(CurrentPlayerId);
+                    Winner = CurrentPlayerId;
                 }
             }
 
@@ -636,7 +637,11 @@ namespace Kdl.Core
             }
             else if(action == PlayerAction.Attack)
             {
-                sb.Append($"\n    ATTACK: hist=" + string.Join(',', AttackerHist.Select(CommonGameState.ToPlayerDisplayNum)));
+                var weaponBonus = PrevState.PlayerWeapons[prevPlayer] == PlayerWeapons[prevPlayer]
+                    ? 0.0 : RuleHelper.Simple.StrengthPerWeapon;
+                var attackStrength = PrevState.PlayerStrengths[prevPlayer] + weaponBonus;
+                sb.Append($"\n    ATTACK: strength={attackStrength:F1} hist="
+                    + string.Join(',', AttackerHist.Select(CommonGameState.ToPlayerDisplayNum)));
             }
 
             if(HasWinner)

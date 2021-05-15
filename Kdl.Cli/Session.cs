@@ -491,7 +491,7 @@ namespace Kdl.Cli
         {
             try
             {
-                var board = Board.FromJson(BoardPath, "", ClosedWingNames);
+                var board = Board.FromJsonFile(BoardPath, ClosedWingNames);
 
                 if(!board.IsValid(out var mistakes))
                 {

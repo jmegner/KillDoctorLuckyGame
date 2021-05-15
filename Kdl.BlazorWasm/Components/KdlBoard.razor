@@ -1,0 +1,77 @@
+﻿@using Kdl.Core
+@using System.Collections.Generic
+@using System.Drawing
+
+<h3>Board</h3>
+
+@code {
+    [Parameter]
+    //public Board TheBoard { get; set; }
+    public string Name { get; set; }
+    protected int BoardWidth { get; set; } = 800;
+    protected int MouseX { get; set; }
+    protected int MouseY { get; set; }
+    protected string FiddleText { get; set; }
+    protected int ClickCount { get; set; }
+
+    protected Dictionary<int,Rectangle> RoomRects;
+
+    protected override Task OnInitializedAsync()
+    {
+        Rectangle rect(int x1, int y1, int x2, int y2)
+            => new Rectangle(x1, y1, x2 - x1 + 1, y2 - y1 + 1);
+        RoomRects = new()
+        {
+            { 1, rect(625, 204, 736, 366) },
+            { 2, rect(626, 375, 803, 568) },
+            { 3, rect(423, 477, 612, 564) },
+            { 4, rect(230, 408, 412, 583) },
+            { 5, rect(253, 205, 413, 398) },
+            { 6, rect(423, 204, 616, 467) },
+            { 7, rect(423, 6, 617, 195) },
+            { 8, rect(621, 6, 803, 128) },
+            { 9, rect(811, 6, 969, 195) },
+            { 10, rect(811, 204, 969, 365) },
+            { 11, rect(813, 374, 967, 630) },
+            { 12, rect(2, 408, 177, 631) },
+            { 13, rect(1, 205, 174, 398) },
+            { 14, rect(3, 6, 245, 197) },
+            { 15, rect(253, 6, 414, 127) },
+
+        };
+
+        return Task.CompletedTask;
+    }
+
+    protected void HandleClick(MouseEventArgs e)
+    {
+        ClickCount++;
+
+        MouseX = (int)e.OffsetX;
+        MouseY = (int)e.OffsetY;
+
+        #if false
+        if(ClickCount % 2 == 1)
+        {
+            FiddleText += $"\n rect({MouseX}, {MouseY}, ";
+        }
+        else
+        {
+            FiddleText += $"{MouseX}, {MouseY})";
+        }
+        #endif
+
+        var clickPoint = new Point(MouseX, MouseY);
+
+        var clickedRoom = RoomRects.FirstOrDefault(entry => entry.Value.Contains(clickPoint)).Key;
+        FiddleText = $"Room {clickedRoom}";
+    }
+
+}
+
+<div width="@BoardWidth">
+    <img width="100%" src="images/BoardAltDown.jpg" @onclick="HandleClick" /><br />
+    <div>@MouseX</div>
+    <div>@MouseY</div>
+    <div>@FiddleText</div>
+</div>

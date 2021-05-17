@@ -2,8 +2,6 @@
 @using System.Collections.Generic
 @using System.Drawing
 
-<h3>Board</h3>
-
 @code {
     [Parameter]
     //public Board TheBoard { get; set; }
@@ -69,6 +67,7 @@
 
 }
 
+<h3>Board</h3>
 <div width="@BoardWidth">
     <img width="100%" src="images/BoardAltDown.jpg" @onclick="HandleClick" /><br />
     <div>@MouseX</div>

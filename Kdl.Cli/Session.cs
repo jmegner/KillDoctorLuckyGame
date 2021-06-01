@@ -113,6 +113,8 @@ namespace Kdl.Cli
         const string TagPlayersLong = "numplayers";
         const string TagClosedWings = "w";
         const string TagClosedWingsLong = "closedwings";
+        const string TagSetValue = "sv";
+        const string TagSetValueLong = "setvalue";
 
         protected void InterpretDirective(string directive)
         {
@@ -238,6 +240,11 @@ namespace Kdl.Cli
                 else
                 {
                     BoardName = tokens[1];
+
+                    if (!BoardName.Contains("Board", StringComparison.OrdinalIgnoreCase))
+                    {
+                        BoardName = "Board" + BoardName;
+                    }
                 }
 
                 PrintGameSettings();
@@ -252,7 +259,7 @@ namespace Kdl.Cli
                 var newVal = NumNormalPlayers;
                 if(tokens.Length != 2 || !int.TryParse(tokens[1], out newVal))
                 {
-                    Console.WriteLine("  numplayers directive needs one integer token");
+                    Console.WriteLine($"  {TagPlayersLong} directive needs one integer token");
                 }
                 else
                 {
@@ -260,6 +267,66 @@ namespace Kdl.Cli
                 }
 
                 PrintGameSettings();
+            }
+            else if(directiveTag == TagSetValue || directiveTag == TagSetValueLong)
+            {
+                const int doctorPlayerNum = 0;
+
+                if(tokens.Length <= 3
+                    || !int.TryParse(tokens[1], out var playerNum)
+                    || playerNum < 0
+                    || playerNum > Game.Common.NumAllPlayers
+                    || !double.TryParse(tokens[3], out var attributeValue)
+                    )
+                {
+                    Console.WriteLine($"  {TagSetValueLong} directive needs following tokens: playerNum attributeName attributeValue");
+                    return;
+                }
+
+                var attributeName = tokens[2];
+                var playerId = playerNum - 1;
+
+                if (attributeName == "r" || attributeName == "room")
+                {
+                    if (!Game.Common.Board.RoomIds.Contains((int)attributeValue))
+                    {
+                        Console.WriteLine($"  invalid room id {attributeValue}");
+                        return;
+                    }
+
+                    if(playerNum == doctorPlayerNum)
+                    {
+                        Game.DoctorRoomId = (int)attributeValue;
+                    }
+                    else
+                    {
+                        Game.PlayerRoomIds[playerId] = (int)attributeValue;
+                    }
+                }
+                else if (attributeName == "s" || attributeName == "strength")
+                {
+                    Game.PlayerStrengths[playerId] = (int)attributeValue;
+                }
+                else if (attributeName == "m" || attributeName == "moves")
+                {
+                    Game.PlayerMoveCards[playerId] = attributeValue;
+                }
+                else if (attributeName == "w" || attributeName == "weapons")
+                {
+                    Game.PlayerWeapons[playerId] = attributeValue;
+                }
+                else if (attributeName == "f" || attributeName == "failures")
+                {
+                    Game.PlayerFailures[playerId] = attributeValue;
+                }
+                else if (attributeName == "t" || attributeName == "turn")
+                {
+                    Game.TurnId = (int)attributeValue;
+                    Game.CurrentPlayerId = playerId;
+                }
+
+                RecentAnalyzedTurn = null;
+                Console.WriteLine(Game.Summary(1));
             }
             else if(char.IsDigit(directiveTag.FirstOrDefault()))
             {

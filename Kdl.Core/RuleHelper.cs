@@ -13,7 +13,7 @@ namespace Kdl.Core
         {
             public const double JustOverOneThird = 11.0 / 32.0;
 
-            public const double PlayerStartingMoveCards = 0.0; //2.5;
+            public const double PlayerStartingMoveCards = 2.0; //2.5;
             public const double MoveCardsPerLoot = JustOverOneThird;
             public const double CloversPerMoveCard = 1.0;
 
@@ -27,6 +27,8 @@ namespace Kdl.Core
             public const double CloversPerFailure = 50.0 / 24.0;
 
             public const double CloversContributedPerStranger = 1.0;
+
+            public const bool StrangersAreNosy = false;
 
         }
 

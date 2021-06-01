@@ -522,7 +522,8 @@ namespace Kdl.Core
                 return PlayerAction.None;
             }
 
-            if(currentPlayerRoomId == DoctorRoomId && !movedStrangerThatSawDoctor)
+            if(currentPlayerRoomId == DoctorRoomId
+                && (!RuleHelper.Simple.StrangersAreNosy || !movedStrangerThatSawDoctor))
             {
                 return PlayerAction.Attack;
             }
